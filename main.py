@@ -82,7 +82,7 @@ color_values = list(colors.values())
 # change the number of chart to the same as the map number you want to play on
 chart = 7 # main map
 
-autologin = True # requires Reddit account details to be put into crewmate.py if set to True
+autologin = False # requires Reddit account details to be put into crewmate.py if set to True
 unit_measurement = 'pixels' # for measuring areas with the line tool, or can use for other tools too
 regular_speed = 0.02 # 0.02 is good, will draw 1 pixel every 0.02 seconds
 speed = regular_speed # you can change the speed in game too
