@@ -1,0 +1,8 @@
+crewmate
+requests
+python-socketio[client]==4.6.1
+Pillow
+selenium
+tkinker
+numpy
+keyboard
