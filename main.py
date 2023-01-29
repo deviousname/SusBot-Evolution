@@ -2,6 +2,7 @@
 import crewmate
 import requests
 import os
+import re
 import json
 import keyboard
 import socketio #requires: python-socketio[client]==4.6.1
@@ -23,7 +24,7 @@ from itertools import cycle
 import tkinter as tk
 from tkinter import Label, Frame, Button
 from functools import partial
-from collections import Counter
+from collections import Counter, deque
 from ast import literal_eval as make_tuple
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -34,10 +35,9 @@ from selenium.webdriver.support import expected_conditions as EC
 driver = webdriver.Firefox()
 sio = socketio.Client()
 
-semaphore = Semaphore(13)
+semaphore = Semaphore(7)
 lock=threading.Lock()
 
-# Color data:
 colors = {(255, 255, 255): 0,  (196, 196, 196): 1,
           (136, 136, 136): 2,  (85, 85, 85): 3,
           (34, 34, 34): 4,     (0, 0, 0): 5,
@@ -80,10 +80,9 @@ colors_reverse = {value: key for key, value in zip(colors.keys(), colors.values(
 color_values = list(colors.values())
 
 # change the number of chart to the same as the map number you want to play on
-chart = 7 # main map
-
+chart =  7
 autologin = False # requires Reddit account details to be put into crewmate.py if set to True
-unit_measurement = 'pixels' # for measuring areas with the line tool, or can use for other tools too
+
 regular_speed = 0.02 # 0.02 is good, will draw 1 pixel every 0.02 seconds
 speed = regular_speed # you can change the speed in game too
 
@@ -91,48 +90,71 @@ stop_key = 'shift+d' #press this to stop all painting operations
 
 class SusBot():        
     def __init__(self): #initiliaze class variables
+        self.chart = chart
         self.speed = speed
-        self.load_map_into_cache()
+        self.load_map_into_cache(self.chart)
         self.root = tk.Tk()
         self.root.title("Colors") 
         if autologin == True:
             self.login()
         else:
-            driver.get(f"https://pixelplace.io/{chart}")
+            driver.get(f"https://pixelplace.io/{self.chart}")
         self.authid, self.authtoken, self.authkey = None, None, None
         while self.authid == None and self.authtoken == None and self.authkey == None:
             try:
                 self.auth_data()
             except:
                 pass
-        if chart != 7:
-            driver.get(f"https://pixelplace.io/{chart}")
-        self.emit_counter = 0
+        if self.chart != 7:
+            driver.get(f"https://pixelplace.io/{self.chart}")
         self.hotkey_preload()
         self.color_counts = {}
         self.hotkeys()
         self.work_order ={}
-        self.brush_size = 2
-        self.color = self.return_color()
-        connection_thread = Thread(target=self.connection)
-        connection_thread.start()
-        connection_thread.join()
+        self.cx, self.cy = 0, 0
+        self.lastx, self.lasty = 0, 0
+        self.z = -1
+        self.coordinates = ()
+        self.connection_thread = threading.Thread(target=self.connection, args=(self.chart,))
+        self.connection_thread.start()
         self.colorweights = {color: 0 for color in colors.keys()}
         self.colorfilter = set()
-        self.colorfilter.add(colors_reverse[self.color])
-        self.colorweights[colors_reverse[self.color]] = 1
+        self.logos = True
+        self.fill_patterns = [((0, 1),(0, -1),(1, 0),(-1,0)), # fill patterns for bucket tool
+                ((2, 1),(2, -1),(-2, 1),(-2, -1),(1, 2),(1, -2),(-1, 2),(-1,-2))]
+        self.labels = ["Pawn moves: stays inside borders", "Knight moves: jumps borders"]
+        self.current_pattern_index = 0
         self.queue = queue.LifoQueue()
         self.label_frame = Frame(self.root)
-        self.show_image = False
         self.label_frame.pack(side='left')
         self.update_labels()
         self.root.wm_attributes("-topmost", True)
         self.root.overrideredirect(True)
         self.root.mainloop()
         
+    def toggle_logos(self): #toggles guild war logos on and off
+        if self.logos == True:
+            for lg in range(10):
+                try:
+                    driver.execute_script("arguments[0].style.display = 'none';",driver.find_element(By.XPATH,f'//*[@id="areas"]/div[{lg}]'))
+                    driver.execute_script("arguments[0].style.display = 'none';",driver.find_element(By.XPATH,f'/html/body/div[3]/div[1]/div[2]/div/a[{lg}]'))
+                except:
+                    pass
+            self.logos = False
+        else:
+            for lg in range(10):
+                try:
+                    driver.execute_script("arguments[0].style.display = 'block';",driver.find_element(By.XPATH,f'//*[@id="areas"]/div[{lg}]'))
+                    driver.execute_script("arguments[0].style.display = 'inline';",driver.find_element(By.XPATH,f'/html/body/div[3]/div[1]/div[2]/div/a[{lg}]'))
+                except:
+                    pass
+            self.logos = True
+        time.sleep(speed * 3)
+        
     def hotkey_preload(self):
+        self.amogus_key = 'e'
+        self.toggle_logos_key = '='
         self.linekey = 'x'
-        self.piekey = 's'
         self.circle_fill_key = 'd'
         self.river_bend_key = 'a'
         self.darken_key = 'r'
@@ -140,6 +162,7 @@ class SusBot():
         self.copykey = 'f8'
         self.pastekey = 'f9'
         self.windkey = 'shift+v'
+        self.toggle_wind_pattern_key = 'b'
         self.downspeed = 'shift+insert'
         self.upspeed = 'shift+del'
         self.fillborderskey = 'b'
@@ -149,97 +172,57 @@ class SusBot():
         controls = ['',
             "Controls:",
             '',
-            f'{self.sample_colors_key} # hold/drag/release to get areas colors',
-            f'{self.sample_colors_key} # tapping will move the color menu',
-            f'-left click on a color menu color to remove half of that color',
-            f'-right click to remove all of that color',
-            f'-hover mouse over menu and use scroll wheel to the value',
-            f'-press ~ (Tilde) to remove half of all sampled colors',
-            f'-spamming ~ (Tilde) will completely clear the sampled colors',
+            f'  {self.sample_colors_key}   hold/drag/release to get areas colors',
+            f'  {self.sample_colors_key}   tapping will move the color menu',
+            '',
+            f'  Left click on a color menu color to remove half of that color',
+            f'  Right click to remove all of that color',
+            f'  Hover mouse over menu and use scroll wheel to change value',
+            f'  Press shift + ~ (shift+Tilde) to remove half of all sampled colors',
+            f'  Spam shift + ~ (shift+Tilde) will completely clear the sampled colors',
             '',   
-            f'{self.linekey} # hold/drag/release to draw line',
-            f'{self.piekey} # hold/drag/release to draw circle outline',
-            f'{self.circle_fill_key} # hold/drag/release to draw filled circle',
-            f'{self.windkey} # press to pour bucket',
+            f'  {self.linekey}   hold/drag/release to draw line',
+            f'  {self.circle_fill_key}   hold/drag/release to draw circle',
+            f'  {self.windkey}   pour bucket',
+            f'  {self.toggle_wind_pattern_key}   toggle bucket pattern',
             '',
-            f'{self.fillborderskey} # hold/drag/release over an area to draw borders',
-            f'{self.river_bend_key} # hold/drag/release to draw bendable line',
-            f'{self.darken_key} # hold/drag/release to darken area',
-            f'{self.lighten_key} # hold/drag/release to lighten area',
+            f'  {self.fillborderskey}   hold/drag/release over an area to draw borders',
+            f'  {self.river_bend_key}   hold/drag/release to draw bendable line',
+            f'  {self.darken_key}   hold/drag/release to darken area',
+            f'  {self.lighten_key}   hold/drag/release to lighten area',
             '',
-            f'{self.copykey} # hold/drag/release over an area to copy',
-            f'{self.pastekey} # press to paste centered at location',
+            f'  {self.copykey}   hold/drag/release over an area to copy',
+            f'  {self.pastekey}   paste centered at location',
             '',
-            f'{self.downspeed} # decrease bot speed',
-            f'{self.upspeed} # increase bot speed',
+            f'  {self.downspeed}   decrease bot speed',
+            f'  {self.upspeed}   increase bot speed',
 
-            f'stop key = {stop_key}',
+            f'  {stop_key}   this will stop all painting jobs',
             '',
             '# ~ ~ ~ ~ ~* ~* ~ ~*','']
         for control in controls:
             print(control)
-        
-    def circle_outline_hotkey(self, key):
-        semaphore.acquire()
-        thread = Thread(target=self.circle_outline, args = key)
-        thread.start()
-        thread.join()
-        semaphore.release()
-
-    def mighty_wind_hotkey(self, key):
-        semaphore.acquire()
-        thread = Thread(target=self.mighty_wind, args = (key,))
-        thread.start()
-        thread.join()
-        semaphore.release()
             
-    def border_helper_hotkey(self, key):
+    def hotkey_handler(self, key, function_name, *args):
         semaphore.acquire()
-        thread = Thread(target=self.border_helper, args = key)
-        thread.start()
-        thread.join()
-        semaphore.release()
-
-    def transparent_circle_hotkey(self, key):
-        semaphore.acquire()
-        thread = Thread(target=self.transparent_circle, args = (key,))
-        thread.start()
-        thread.join()
-        semaphore.release()
-        
-    def circle_fill_hotkey(self, key):
-        semaphore.acquire()
-        thread = Thread(target=self.circle_fill, args = key)
-        thread.start()
-        thread.join()
-        semaphore.release()
-        
-    def thick_line_hotkey(self, key, width):
-        semaphore.acquire()
-        thread = Thread(target=self.thick_line, args=(self.linekey, width))
-        thread.start()
-        thread.join()
-        semaphore.release()
-        
-    def river_bend_hotkey(self, key):
-        semaphore.acquire()
-        thread = Thread(target=self.river_bend, args = key)
+        thread = Thread(target=getattr(self, function_name), args=(key, *args))
         thread.start()
         thread.join()
         semaphore.release()
 
     def hotkeys(self):
-        keyboard.add_hotkey(self.linekey,lambda:Thread(target=self.thick_line_hotkey, args=(self.linekey,1)).start())
-        keyboard.add_hotkey(self.piekey,lambda:Thread(target=self.circle_outline_hotkey, args=(self.piekey)).start())
-        keyboard.add_hotkey(self.circle_fill_key, lambda: Thread(target=self.circle_fill_hotkey, args=(self.circle_fill_key)).start())
-        keyboard.add_hotkey(self.copykey,lambda: self.copypaste(self.copykey))                            
-        keyboard.add_hotkey(self.pastekey,lambda: self.copypaste(self.pastekey))                           
-        keyboard.add_hotkey(self.windkey,lambda: Thread(target=partial(self.mighty_wind_hotkey, self.windkey)).start())
-        keyboard.add_hotkey(self.fillborderskey,lambda:Thread(target=self.border_helper_hotkey, args=(self.fillborderskey)).start())                            
-        keyboard.add_hotkey(self.sample_colors_key, lambda:Thread(target=self.sample_colors).start())
-        keyboard.add_hotkey(self.darken_key,lambda:Thread(target=partial(self.transparent_circle_hotkey, self.darken_key)).start())
-        keyboard.add_hotkey(self.lighten_key,lambda:Thread(target=partial(self.transparent_circle_hotkey, self.lighten_key)).start())
-        keyboard.add_hotkey(self.river_bend_key,lambda:Thread(target=self.river_bend_hotkey(self.river_bend_key)).start())                     
+        keyboard.add_hotkey(self.amogus_key,lambda:self.amogus())
+        keyboard.add_hotkey(self.toggle_logos_key,lambda:self.toggle_logos())
+        keyboard.add_hotkey(self.linekey,lambda:Thread(target=partial(self.hotkey_handler, self.linekey, "thick_line", 1)).start())
+        keyboard.add_hotkey(self.circle_fill_key, lambda: Thread(target=partial(self.hotkey_handler, self.circle_fill_key, 'circle_fill')).start())
+        keyboard.add_hotkey(self.copykey,lambda:  self.copypaste(self.copykey))            
+        keyboard.add_hotkey(self.pastekey,lambda:  self.copypaste(self.pastekey))
+        keyboard.add_hotkey(self.windkey,lambda: Thread(target=partial(self.hotkey_handler, self.windkey, 'mighty_wind')).start())                            
+        keyboard.add_hotkey(self.fillborderskey,lambda:Thread(target=partial(self.hotkey_handler, self.fillborderskey, 'border_helper')).start())                            
+        keyboard.add_hotkey(self.sample_colors_key, lambda:Thread(target=partial(self.sample_colors)).start())                            
+        keyboard.add_hotkey(self.darken_key,lambda:Thread(target=partial(self.hotkey_handler, self.darken_key, 'transparent_circle')).start())                            
+        keyboard.add_hotkey(self.lighten_key,lambda:Thread(target=partial(self.hotkey_handler, self.lighten_key, 'transparent_circle')).start())                            
+        keyboard.add_hotkey(self.river_bend_key,lambda:self.river_bend(self.river_bend_key))           
         keyboard.add_hotkey(self.downspeed, lambda: self.change_speed(self.downspeed))
         keyboard.add_hotkey(self.upspeed, lambda: self.change_speed(self.upspeed))
         for i in range(1, 10):
@@ -253,17 +236,43 @@ class SusBot():
             x, y, color = self.queue.get(block=False)
             if color == None:
                 color = self.random_weighted_color()
-            if self.cache[x, y] not in [colors_reverse[color]] + null + [i for i in self.colorfilter]:
-                lock.acquire()
-                sio.emit('p',[x, y, color, 1])
-                if keyboard.is_pressed(stop_key):
-                    self.queue = queue.LifoQueue()
-                time.sleep(self.speed - (self.start - time.perf_counter()))
-                self.start = time.perf_counter()
-                lock.release()
+            if x > 0 and x < self.width and y > 0 and y < self.height:
+                if self.cache[x, y] not in [colors_reverse[color]] + null + [i for i in self.colorfilter]:
+                    lock.acquire()
+                    sio.emit('p',[x, y, color, 1])
+                    if keyboard.is_pressed(stop_key):
+                        self.queue = queue.LifoQueue()
+                    time.sleep(self.speed - (self.start - time.perf_counter()))
+                    self.start = time.perf_counter()
+                    lock.release()
+                    return True
+                else:
+                    return False
+            else:
+                return False
+        except:
+            return False
+        
+    def amogus(self):
+        try:
+            self.start = time.perf_counter()
+            X, Y = self.xy()
+            facing_right = X >= self.lastx
+            for n in range(2):
+                self.emitsleep(X + (-n * self.z if facing_right else n * self.z), Y, 38 if facing_right else 37)
+            x = X + (self.z if facing_right else -1)
+            y = Y + 2
+            body_main = [(-2,0),(-1,0),(-2,1),(-1,1),(-1,2),(-1,-1),(0,-1),(1,-1),(0,1),(1,1),(1,2),]
+            if facing_right:
+                body = body_main
+            else:
+                body = [(x[0] * -1, x[1]) for x in body_main]
+            for n in body:
+                self.emitsleep(n[0]+X, n[1]+Y)
+            self.lastx, self.lasty = X, Y
         except:
             pass
-            
+        
     def sample_colors(self):
         try:
             self.update_window_pos()
@@ -291,57 +300,54 @@ class SusBot():
             pass
         
     def transparent_circle(self, key):
+        self.start = time.perf_counter()
         try:
             end, start = self.zone(key)
-        except:
-            return
-        x2, y2 = end
-        x1, y1 = start
-        r = int(math.sqrt((x2-x1)**2 + (y2-y1)**2))
-        coords = self.spiral_coords(start, r)            
-        self.start = time.perf_counter()        
-        if key == self.darken_key:
-            self.emitsleep(x2, y2, self.reverse_color_shift(self.cache[x2, y2]))
-        elif key == self.lighten_key:
-            self.emitsleep(x2, y2, self.color_shift(self.cache[x2, y2]))
-        for coord in coords:
-            if keyboard.is_pressed(stop_key):
-                return
+            x2, y2 = end
+            x1, y1 = start
+            r = int(math.sqrt((x2-x1)**2 + (y2-y1)**2))
+            coords = self.spiral_coords(start, r)
             if key == self.darken_key:
-                self.emitsleep(coord[0], coord[1], self.reverse_color_shift(self.cache[coord[0], coord[1]]))
+                self.emitsleep(x1, y1, self.color_shift(self.cache[x1, y1], -1))
             elif key == self.lighten_key:
-                self.emitsleep(coord[0], coord[1], self.color_shift(self.cache[coord[0], coord[1]]))
-                
+                self.emitsleep(x1, y1, self.color_shift(self.cache[x1, y1], 1))
+            for coord in coords:
+                if keyboard.is_pressed(stop_key):
+                    return
+                if key == self.darken_key:
+                    self.emitsleep(coord[0], coord[1], self.color_shift(self.cache[coord[0], coord[1]], -1))
+                elif key == self.lighten_key:
+                    self.emitsleep(coord[0], coord[1], self.color_shift(self.cache[coord[0], coord[1]], 1))
+        except:
+            pass
+        
     def river_bend(self, key):
-        self.start=time.perf_counter()
+        self.start = time.perf_counter()
         try:
             river_thickness_fill_list = []
             rotations = [1,-1]
             rotation_cycle = cycle(rotations)
-            def r():
-                return next(rotation_cycle)
-            start, end, control = self.xy(),self.xy(),self.xy()
-            control_stack = set()
+            start, control = self.xy(), self.xy()
+            control_stack = []
             while keyboard.is_pressed(key):
-                self.xy()
-                control_stack.add((self.x, self.y))
+                control_stack.append((self.xy()))
             end = self.xy()
             control_average = []
-            control_average += self.coordinate_list_average(control_stack, start, end)
+            control_average.extend(self.coordinate_list_average(control_stack, start, end))
             distance = self.distance(start, end) + self.distance(control_average, end)
-            river_set = set()
             for i in range(distance):
                 t = i / distance
                 xfl = (1-t)**2 * start[0] + (2 * t * (1-t) * control_average[0]) + (t**2 * end[0])
                 yfl = (1-t)**2 * start[1] + (2 * t * (1-t) * control_average[1]) + (t**2 * end[1])
-                for i in ((xfl+r(),yfl),(xfl+r(),yfl),(xfl,yfl+r()),(xfl,yfl+r())):                    
-                    self.emitsleep(i[0], i[1])
-                    if keyboard.is_pressed(stop_key):
-                        return
+                for rotation in rotations:
+                    for i in ((xfl+rotation,yfl),(xfl,yfl+rotation)):
+                        self.emitsleep(i[0], i[1])
+                        if keyboard.is_pressed(stop_key):
+                            return
         except:
             pass
         
-    def copypaste(self, key):#need to update to queue usage
+    def copypaste(self, key):
         self.start = time.perf_counter()
         try:
             if key == self.copykey:
@@ -353,80 +359,49 @@ class SusBot():
                 print('Copying.')
                 cx = (x2 - x1) // 2
                 cy = (y2 - y1) // 2
-                for X in range(x1, x2):
-                    for Y in range(y1, y2):
+                self.cx, self.cy = cx, cy
+                for X in range(x1, x2+1):
+                    for Y in range(y1, y2+1):
                         if self.cache[X, Y] not in null + [i for i in self.colorfilter]:
                             self.work_order.add((X-x1-cx, Y-y1-cy, colors[self.cache[X, Y]]))
-                print('Done.')
+                print(f'Copied {len(self.work_order)} pixels.')
             elif key == self.pastekey:
                 if self.work_order:
-                    print('Pasting.')
                     self.xy()
-                    for i in self.work_order:
+                    self.ordered_work = self.spiral_order(self.work_order, self.cx, self.cy)
+                    for i in self.ordered_work:
                         self.emitsleep(i[0]+self.x, i[1]+self.y, i[2])
                         if keyboard.is_pressed(stop_key):
                             return
         except:
             pass
-        
-    def circle_outline(self, key):
-        try:
-            self.start = time.perf_counter()
-            try:
-                start, end = self.zone(key)
-            except:
-                return
-            x2, y2 = start
-            x1, y1 = end
-            r = int((((x2-x1)**2 + (y2-y1)**2))**0.5)
-            x = r-1
-            y = 0
-            dx = 1
-            dy = 1
-            err = dx - (r << 1)
-            while x >= y:
-                for c in self.circxy(x1, x, y1, y):
-                    self.emitsleep(c[0],c[1])
-                if err > 0:
-                    x -= 1
-                    dx += 2
-                    err += dx - (r << 1)
-                if err <= 0:
-                    y += 1
-                    err += dy
-                    dy += 2
-                if keyboard.is_pressed(stop_key):
-                    return
-        except:
-            pass
 
+    def toggle_pattern(self): # change the pattern of the mighty_wind fill bucket tool
+        self.current_pattern_index = (self.current_pattern_index + 1) % len(self.fill_patterns)
+        self.current_fill_pattern = self.fill_patterns[self.current_pattern_index]
+        print(self.labels[self.current_pattern_index])
+        time.sleep(speed * 3)
+    
     def mighty_wind(self, key):
-        try:
-            self.start = time.perf_counter()
-            locs = set()            
-            def locate():
-              locs.add(self.xy())
-            locate()
-            while len(set(locs)) > 0:
-                x, y = locs.pop()
-                for i in ((x, y),(x+1, y),(x-1, y),(x, y-1),(x, y+1)):
-                    if self.cache[i[0], i[1]] not in null + [i for i in self.colorfilter]:
-                        self.emitsleep(i[0], i[1])
-                        locs.add((i[0], i[1]))
-                    if keyboard.is_pressed(key):
-                        locate()
-                    if keyboard.is_pressed(stop_key):
-                        return
-        except:
-            pass
+        self.start = time.perf_counter()
+        locs = set()            
+        def locate():
+          locs.add(self.xy())
+        locate()        
+        while len(set(locs)) > 0:
+            if keyboard.is_pressed(self.toggle_wind_pattern_key):
+                self.toggle_pattern()
+            if keyboard.is_pressed(stop_key):
+                return
+            x, y = locs.pop()
+            if self.emitsleep(x, y):
+                for i in self.fill_patterns[self.current_pattern_index]:
+                    locs.add((i[0]+x, i[1]+y))
         
     def border_helper(self, key):
+        self.start = time.perf_counter()
         try:
-            self.start = time.perf_counter()
-            try:
-                start, end = self.zone(key)
-            except:
-                return            
+            start, end = self.zone(key)            
             x2, y2 = start
             x1, y1 = end
             border_list = set()
@@ -434,56 +409,33 @@ class SusBot():
                 for y in range(min(y1,y2), max(y1,y2)):
                     for i in ((x, y),(x+1, y),(x-1, y),(x, y-1),(x, y+1)):
                         for ap in [(i[0]+1, i[1]), (i[0]-1, i[1]), (i[0], i[1]+1), (i[0], i[1]-1)]:
-                            if self.cache[ap[0], ap[1]] in [(204,204,204)] and self.cache[i[0], i[1]] not in [(204,204,204)]:
+                            if self.cache[ap[0], ap[1]] in null and self.cache[i[0], i[1]] not in null:
                                 border_list.add((i[0], i[1]))
             for i in border_list:
                 self.emitsleep(i[0], i[1])
         except:
             pass
-        
+    
     def circle_fill(self, key):
+        self.start = time.perf_counter()
         try:
-            self.start = time.perf_counter()
-            try:
-                start, end = self.zone(key)
-            except:
-                return        
+            start, end = self.zone(key)    
             x2, y2 = start
             x1, y1 = end
             r = int((((x2-x1)**2 + (y2-y1)**2))**0.5)
-            x = r-1
-            y = 0
-            dx = 1
-            dy = 1
-            err = dx - (r << 1)
-            set1=set()
-            while x >= y:
-                for c in self.circxy(x1, x, y1, y):
-                    set1.add((c[0], c[1]))
-                if err > 0:
-                    x -= 1
-                    dx += 2
-                    err += dx - (r << 1)
-                if err <= 0:
-                    y += 1
-                    dy += 2
-                    err += dy
-            for i in range(x1-r,x1+r):
-                for j in range(y1-r,y1+r):
-                    if ((i-x1)**2 + (j-y1)**2)**0.5 <= r:
-                        set1.add((i,j))
-            color = self.return_color()
-            for c in set1:
+            self.coordinates  = self.spiral_order([(x,y) for x in range(x1-r, x1+r+1) for y in range(y1-r, y1+r+1) if ((x-x1)**2 + (y-y1)**2)**0.5 <= r], x1, y1)
+            for c in self.coordinates:
                 self.emitsleep(c[0],c[1])
                 if keyboard.is_pressed(stop_key):
                     return
+            self.coordinates = ()
         except:
             pass
-        
+
     def thick_line(self, key, width):
         self.start = time.perf_counter()
-        set1 = set()
         try:
+            set1 = set()
             color=self.return_color()
             start, end = self.zone(key)
             x2, y2 = end
@@ -506,7 +458,6 @@ class SusBot():
                 for j in range(-width // 2, width // 2 + 1):
                     set1.add((x3 + j, y3))
                     set1.add((x3, y3 + j))
-            color = self.return_color()
             for c in set1:
                 self.emitsleep(c[0],c[1])
         except:
@@ -551,12 +502,6 @@ class SusBot():
             self.colorweights[color] -= 1
             if self.colorweights[color] < 0:
                 self.colorweights[color] = 0
-        
-    def adjust_colorweight(self, event, color):
-        if event.delta > 0:
-            self.colorweights[color] += 1
-        elif event.delta < 0:
-            self.colorweights[color] -= 1
         
     def half_color_filter(self, color):
         self.colorweights[color] = self.colorweights[color] // 2
@@ -628,7 +573,19 @@ class SusBot():
             return False
         except:
             pass
-       
+        
+    def spiral_order(self, coordinates, center_x, center_y):
+        coordinates = sorted(set(coordinates), key=lambda x: ((x[0]-center_x)**2 + (x[1]-center_y)**2)**0.5, reverse=True)
+        return coordinates
+    
+    def zone(self, key):
+        x1, y1 = self.xy()
+        while True:
+            if not keyboard.is_pressed(key):
+                break
+        x2, y2 = self.xy()
+        return [x1, y1], [x2, y2]
+    
     def get_color_name(self, rgb):
         lista = labeled_colors
         return lista[rgb]
@@ -638,37 +595,27 @@ class SusBot():
       coords = []
       x_offset, y_offset = 0, 0
       for r in range(radius+1):
-        # Move right
         for i in range(r*2):
           x += 1
           distance = math.sqrt((x - center[0])**2 + (y - center[1])**2)
           if distance <= radius:
             coords.append((x, y))
-        # Move up
         for i in range(r*2):
           y += 1
           distance = math.sqrt((x - center[0])**2 + (y - center[1])**2)
           if distance <= radius:
             coords.append((x, y))
-        # Move left
         for i in range(r*2+1):
           x -= 1
           distance = math.sqrt((x - center[0])**2 + (y - center[1])**2)
           if distance <= radius:
             coords.append((x, y))
-        # Move down
         for i in range(r*2+1):
           y -= 1
           distance = math.sqrt((x - center[0])**2 + (y - center[1])**2)
           if distance <= radius:
             coords.append((x, y))
       return coords
-
-    def circxy(self, x1, x, y1, y):
-        circ = [[x1 + x, y1 + y],[x1 + y, y1 + x],[x1 - y, y1 + x],[x1 - x, y1 + y],
-                [x1 - x, y1 - y],[x1 - y, y1 - x],[x1 + y, y1 - x],[x1 + x, y1 - y]]
-        return circ
-
                     
     def change_speed(self, key):
         if key == self.downspeed:
@@ -687,37 +634,27 @@ class SusBot():
     def xy(self):
         try:
             self.x, self.y = make_tuple(driver.find_element(By.XPATH,'/html/body/div[3]/div[4]').text)
-            return self.x, self.y
         except:
-            pass
+            self.x, self.y = None, None
+        return self.x, self.y
           
     def distance(self, xy1, xy2):
         return int(math.sqrt((xy2[0] - xy1[0])**2 + (xy2[1] - xy1[1])**2))
 
     def coordinate_list_average(self, coordinate_set, start_coordinate, end_coordinate):
         try:
-            x_sum = 0
-            y_sum = 0
-            weight_sum = 0
-            for coordinate in coordinate_set:
-                distance_from_start = math.sqrt((coordinate[0] - start_coordinate[0]) ** 2 + (coordinate[1] - start_coordinate[1]) ** 2)
-                distance_from_end = math.sqrt((coordinate[0] - end_coordinate[0]) ** 2 + (coordinate[1] - end_coordinate[1]) ** 2)
-                weight = max(distance_from_start, distance_from_end)
-                x_sum += coordinate[0] * weight
-                y_sum += coordinate[1] * weight
-                weight_sum += weight
+            weight_sum = sum(max(math.sqrt((coordinate[0] - start_coordinate[0]) ** 2 + (coordinate[1] - start_coordinate[1]) ** 2),
+                                math.sqrt((coordinate[0] - end_coordinate[0]) ** 2 + (coordinate[1] - end_coordinate[1]) ** 2))
+                                for coordinate in coordinate_set)
+            x_sum = sum(coordinate[0] * max(math.sqrt((coordinate[0] - start_coordinate[0]) ** 2 + (coordinate[1] - start_coordinate[1]) ** 2),
+                                           math.sqrt((coordinate[0] - end_coordinate[0]) ** 2 + (coordinate[1] - end_coordinate[1]) ** 2))
+                                           for coordinate in coordinate_set)
+            y_sum = sum(coordinate[1] * max(math.sqrt((coordinate[0] - start_coordinate[0]) ** 2 + (coordinate[1] - start_coordinate[1]) ** 2),
+                                           math.sqrt((coordinate[0] - end_coordinate[0]) ** 2 + (coordinate[1] - end_coordinate[1]) ** 2))
+                                           for coordinate in coordinate_set)
             return int(x_sum/weight_sum), int(y_sum/weight_sum)
         except:
             pass
-
-    def zone(self, key):
-        x1, y1 = self.xy()
-        while True:
-            if not keyboard.is_pressed(key):
-                break
-        x2, y2 = self.xy()
-        time.sleep(1)
-        return [x1, y1], [x2, y2]
 
     def get_color_index(self):
         try:
@@ -737,93 +674,75 @@ class SusBot():
         elif type(input1) == tuple:
             return colors[(input1)]
           
-    def color_shift(self, color):
-        if isinstance(color, int):
-            for c, i in colors.items():
-                if i == color:
-                    color = c
-                    break
+    def color_shift(self, color, direction):
         color_int = None
         for c, i in colors.items():
-            if c == color:
+            if c == color or i == color:
                 color_int = i
                 break
         if color_int is None:
             return -1
-        next_color_int = (color_int + 1) % len(colors)
-        while next_color_int not in colors.values():
-            next_color_int = (next_color_int + 1) % len(colors)
-        return next_color_int
-      
-    def reverse_color_shift(self, color):
-        if isinstance(color, int):
-            for c, i in reversed(list(colors.items())):
-                if i == color:
-                    color = c
-                    break
-        color_int = None
-        for c, i in reversed(list(colors.items())):
-            if c == color:
-                color_int = i
-                break
-        if color_int is None:
-            return -1
-        next_color_int = (color_int - 1) % len(colors)
-        while next_color_int not in colors.values():
-            next_color_int = (next_color_int - 1) % len(colors)
-        return next_color_int
-    
-    def load_map_into_cache(self):
-        with open(f'{chart}.png', 'wb') as f:
+        next_color_int = (color_int + direction) % len(colors)
+        if next_color_int not in colors.values():
+            next_color_int = next(i % len(colors) for i in range(next_color_int+direction, next_color_int+len(colors)*direction, direction) if i % len(colors) in colors.values())
+        return next_color_int    
+          
+    def load_map_into_cache(self, chart):
+        with open(f'{self.chart}.png', 'wb') as f:
             f.write(requests.get(f'https://pixelplace.io/canvas/{chart}.png?t={random.randint(9999,99999)}').content)
-        self.image = PIL.Image.open(f'{chart}.png').convert('RGB')
-        self.cache = self.image.load()
+        self.image = Image.open(f'{self.chart}.png').convert('RGB')
         self.width, self.height = self.image.size
+        if self.chart != 7:
+            self.image.putpixel((self.width-1, self.height-1), (0, 0, 0))
+        self.image.save(f'{self.chart}.png')
+        self.cache = self.image.load()
+        print(f'Successfully loaded chart: {self.chart}')
         
     def clear_cookies(self, url):
         driver.get(url)
         driver.delete_all_cookies()
         
     def login(self):
-        if autologin == True:
-            self.clear_cookies('https://reddit.com')
-        driver.get("https://pixelplace.io/api/sso.php?type=2&action=login")
-        driver.find_element(By.ID,'loginUsername').send_keys(crewmate.username)
-        driver.find_element(By.ID,'loginPassword').send_keys(crewmate.password)
-        driver.find_elements(By.XPATH,'/html/body/div/main/div[1]/div/div[2]/form/fieldset')[4].click()
-        WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH,'/html/body/div[3]/div/div[2]/form/div/input'))).click()
         try:
+            driver.get("https://pixelplace.io/api/sso.php?type=2&action=login")
+            driver.find_element(By.ID,'loginUsername').send_keys(crewmate.username)
+            driver.find_element(By.ID,'loginPassword').send_keys(crewmate.password)
+            driver.find_elements(By.XPATH,'/html/body/div/main/div[1]/div/div[2]/form/fieldset')[4].click()
             WebDriverWait(driver, 10).until(
-                    EC.element_to_be_clickable((By.XPATH,'/html/body/div[5]/div[2]/a/img'))).click()
+                EC.element_to_be_clickable((By.XPATH,'/html/body/div[3]/div/div[2]/form/div/input'))).click()
+            WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH,'/html/body/div[5]/div[2]/a/img'))).click()
             WebDriverWait(driver, 10).until(
                 EC.element_to_be_clickable((By.XPATH,'/html/body/div[3]/div[8]/a[2]/div[3]/button[2]'))).click()
+            print('Logged in.')
         except:
+            print('An error while trying to log in.')
+            print('Please proceed manually.')
             pass
-        print('Logged in.')
-        return
       
     def auth_data(self):
         self.authkey = driver.get_cookie("authKey").get('value')
         self.authtoken = driver.get_cookie("authToken").get('value')
         self.authid = driver.get_cookie("authId").get('value')
         
-    def connection(self):
+    def connection(self, chart):
         sio.connect('https://pixelplace.io', transports=['websocket'])
-        @sio.event
         
+        @sio.event        
         def connect():
-            sio.emit("init",{"authKey":f"{self.authkey}","authToken":f"{self.authtoken}","authId":f"{self.authid}","boardId":chart})
+            self.chart = chart
+            sio.emit("init",{"authKey":f"{self.authkey}","authToken":f"{self.authtoken}","authId":f"{self.authid}","boardId":self.chart})
             threading.Timer(15, connect).start()
             
         @sio.on("p")        
-        def update_pixels(p: tuple):
-            try:
-                for i in p:
-                    self.cache[i[0], i[1]] = colors_reverse[i[2]]
-            except:
-                pass
-            
+        def update_pixels(p: tuple): 
+            for i in p:
+                try: 
+                    if self.cache[i[0], i[1]] not in null:
+                        self.cache[i[0], i[1]] = colors_reverse[i[2]]
+                except:
+                    pass
+                    
     def visibility_state(self):
         try:
             vis = driver.execute_script("return document.visibilityState") == "visible"
