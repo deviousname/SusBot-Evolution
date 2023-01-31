@@ -710,7 +710,8 @@ class SusBot():
         try:
             cid = str(driver.find_element(By.XPATH,'/html/body/div[3]/div[2]').get_attribute("style"))
             a = cid.find('(')
-            b = cid.find(')');b+=1
+            b = cid.find(')')
+            b+=1
             cid = cid[a:b]
         finally:
             return self.get_color(make_tuple(cid))
