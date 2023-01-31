@@ -216,7 +216,7 @@ class SusBot():
         keyboard.add_hotkey(self.linekey,lambda:Thread(target=partial(self.hotkey_handler, self.linekey, "thick_line", 1)).start())
         keyboard.add_hotkey(self.circle_fill_key, lambda: Thread(target=partial(self.hotkey_handler, self.circle_fill_key, 'circle_fill')).start())
         keyboard.add_hotkey(self.copykey,lambda:  self.copypaste(self.copykey))            
-        keyboard.add_hotkey(self.pastekey,lambda:  self.copypaste(self.pastekey))
+        keyboard.add_hotkey(self.pastekey,lambda:  Thread(target=partial(self.hotkey_handler, self.pastekey, 'copypaste')).start())
         keyboard.add_hotkey(self.windkey,lambda: Thread(target=partial(self.hotkey_handler, self.windkey, 'mighty_wind')).start())                            
         keyboard.add_hotkey(self.fillborderskey,lambda:Thread(target=partial(self.hotkey_handler, self.fillborderskey, 'border_helper')).start())                            
         keyboard.add_hotkey(self.sample_colors_key, lambda:Thread(target=partial(self.sample_colors)).start())                            
