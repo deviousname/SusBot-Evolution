@@ -253,22 +253,83 @@ class SusBot():
         except:
             return False
         
-    def amogus(self):
+    def random_weighted_color(self):
+        color_weights = self.colorweights
+        total_weight = sum(weight for color, weight in color_weights.items())
+        try:
+          color_weights = {color:weight/total_weight for color,weight in color_weights.items()}
+        except:
+          color = self.return_color()
+          return color
+        color = random.choices(list(colors_reverse.keys()),weights=color_weights.values(), k=1)
+        return color[0]
+    
+    def get_darkest_lightest_rgb(self, color_weights):
+        def brightness(color_weight):
+            color, weight = color_weight
+            return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]
+        color_weights = {color: weight for color, weight in self.colorweights.items() if color in self.colorfilter}
+        sorted_color_weights = sorted(color_weights.items(), key=brightness)
+        n = len(sorted_color_weights)
+        light_colors = sorted_color_weights[:n//2]
+        dark_colors = sorted_color_weights[n//2:]
+
+        light_color = random.choices([color for color, weight in light_colors],
+                                     weights=[weight for color, weight in light_colors], k=1)
+        dark_color = random.choices([color for color, weight in dark_colors],
+                                    weights=[weight for color, weight in dark_colors], k=1)
+        return light_color[0], dark_color[0]
+
+
+    def amogus(self): # 4-way directional (awesome, I know)
         try:
             self.start = time.perf_counter()
             X, Y = self.xy()
             facing_right = X >= self.lastx
-            for n in range(2):
-                self.emitsleep(X + (-n * self.z if facing_right else n * self.z), Y, 38 if facing_right else 37)
-            x = X + (self.z if facing_right else -1)
-            y = Y + 2
-            body_main = [(-2,0),(-1,0),(-2,1),(-1,1),(-1,2),(-1,-1),(0,-1),(1,-1),(0,1),(1,1),(1,2),]
-            if facing_right:
-                body = body_main
+            facing_up = Y <= self.lasty
+            if facing_right and facing_up:
+                self.emitsleep(X + 1, Y, 38)
+            elif facing_right and not facing_up:
+                for n in range(2):
+                    self.emitsleep(X + (-n * self.z), Y, 38 if facing_right else 37)
+            elif not facing_right and facing_up:
+                self.emitsleep(X - 1, Y, 37)
             else:
-                body = [(x[0] * -1, x[1]) for x in body_main]
+                for n in range(2):
+                    self.emitsleep(X + (n * self.z), Y, 38 if facing_right else 37)
+
+            x = X + (self.z if facing_right else -1)
+            y = Y + (2 if facing_up else -2)
+            
+            body_main_right_up = [(-1,-1),(0,-1),(1,-1),(0,0),(0,1),(1,1),(-1,2),(1,2),]
+            backpack_right_up = [(-1,0),(-2,0),(-2,1),(-1,1),]
+
+            body_main_right_down = [(-1,-1),(-1,1),(0,-1),(1,-1),(-1,0),(-1,1),(0,1),(1,1),(-1,2),(1,2),]
+            backpack_right_down  = [(-2,0),(-2,1),]
+            
+            body_main_left_up = [(x * -1, y) for x, y in body_main_right_up]
+            backpack_left_up = [(x * -1, y) for x, y in backpack_right_up]
+            
+            body_main_left_down = [(x * -1, y) for x, y in body_main_right_down]
+            backpack_left_down = [(x * -1, y) for x, y in backpack_right_down]
+            
+            if facing_right and facing_up:
+                body = body_main_right_up
+                backpack = backpack_right_up
+            elif facing_right and not facing_up:
+                body = body_main_right_down
+                backpack = backpack_right_down
+            elif not facing_right and facing_up:
+                body = body_main_left_up
+                backpack = backpack_left_up
+            else:
+                body = body_main_left_down
+                backpack = backpack_left_down
+            clothes_colors = self.get_darkest_lightest_rgb(self.colorfilter)
             for n in body:
-                self.emitsleep(n[0]+X, n[1]+Y)
+                self.emitsleep(n[0]+X, n[1]+Y, colors[clothes_colors[1]] if self.colorfilter else None)
+            for n in backpack:
+                self.emitsleep(n[0]+X, n[1]+Y, colors[clothes_colors[0]] if self.colorfilter else None)
             self.lastx, self.lasty = X, Y
         except:
             pass
@@ -535,17 +596,6 @@ class SusBot():
         for color, weight in self.colorweights.items():
             if weight > 0:
                 self.colorfilter.add(color) 
-        
-    def random_weighted_color(self):
-        color_weights = self.colorweights
-        total_weight = sum(weight for color, weight in color_weights.items())
-        try:
-          color_weights = {color:weight/total_weight for color,weight in color_weights.items()}
-        except:
-          color = self.return_color()
-          return color
-        color = random.choices(list(colors_reverse.keys()),weights=color_weights.values(), k=1)
-        return color[0]
         
     def rgb_to_brightness(self, rgb):
         return int(0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2])    
