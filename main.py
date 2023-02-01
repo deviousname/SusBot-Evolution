@@ -31,13 +31,17 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+import win32api
 
+# start driver class for web browser and socketio
 driver = webdriver.Firefox()
+driver.set_window_position((win32api.GetSystemMetrics(0)//3)*1,0)
 sio = socketio.Client()
 
-semaphore = Semaphore(7)
+# create a threading lock for the pixel timing system
 lock=threading.Lock()
 
+# set up color data:
 colors = {(255, 255, 255): 0,  (196, 196, 196): 1,
           (136, 136, 136): 2,  (85, 85, 85): 3,
           (34, 34, 34): 4,     (0, 0, 0): 5,
@@ -63,7 +67,9 @@ colors = {(255, 255, 255): 0,  (196, 196, 196): 1,
           (101, 131, 207): 34, (54, 186, 255): 35,
           (0, 131, 199): 36,   (0, 211, 221): 37,
           (69, 255, 200): 38,  (181, 232, 238): 48}
+
 null = [(204,204,204)]
+
 labels = ['Snow', 'Silver', 'Iron', 'Steel', 'Titanium', 'Outer-space', 'Dark jungle',
           'Jungle', 'Dark forest', 'Forest', 'Wetlands', 'Savannah', 'Sun',
           'Gold', 'Flame', 'Pine', 'Maple', 'Oak', 'Crimson', 'Red', 'Ruby',
@@ -75,44 +81,69 @@ labels = ['Snow', 'Silver', 'Iron', 'Steel', 'Titanium', 'Outer-space', 'Dark ju
           'Blood', 'Grapefruit', 'Amenthyst',
           'Deep sea', 'Emerald', 'Concrete',
           'Woodland', 'Jade', 'Olive']
+
 labeled_colors = {k: labels[v] for k, v in colors.items()}
+print(labels[5], 'is mighty.')
 colors_reverse = {value: key for key, value in zip(colors.keys(), colors.values())}
 color_values = list(colors.values())
 
+print('Loading SusBot, please stand-by...')
+
 # change the number of chart to the same as the map number you want to play on
 chart =  7
-autologin = False # requires Reddit account details to be put into crewmate.py if set to True
 
+# auto login True/False, requires Reddit account info in crewmate.py
+# - its in the same folder as susbots other files,
+# - just goto the folder and right click to edit it
+# - put your name and password inside the '' marks and save the file
+autologin = False
+
+# speed settings
 regular_speed = 0.02 # 0.02 is good, will draw 1 pixel every 0.02 seconds
 speed = regular_speed # you can change the speed in game too
 
-stop_key = 'shift+d' #press this to stop all painting operations
+# Emergency Stop Button:
+# - this will stop all threads
+# - and await your next command
+stop_key = 'shift+d'
 
-class SusBot():        
-    def __init__(self): #initiliaze class variables
+# set up the main bot class
+class SusBot():
+
+    # initiliaze class variables    
+    def __init__(self): # . . .
         self.chart = chart
-        self.speed = speed
-        self.load_map_into_cache(self.chart)
+         
+        # set up the gui window, part 1
         self.root = tk.Tk()
-        self.root.title("Colors") 
+        self.root.title("SusBot: Evolution")
+
+        # automate login to website        
         if autologin == True:
+            print('Logging in.')
             self.login()
         else:
+            print('Please log in.')
             driver.get(f"https://pixelplace.io/{self.chart}")
         self.authid, self.authtoken, self.authkey = None, None, None
         while self.authid == None and self.authtoken == None and self.authkey == None:
             try:
                 self.auth_data()
             except:
-                pass
+                pass            
+            
         if self.chart != 7:
             driver.get(f"https://pixelplace.io/{self.chart}")
-        self.hotkey_preload()
-        self.color_counts = {}
-        self.hotkeys()
+        self.load_map_into_cache(self.chart)
+        
+        #define a bunch of variables:
+        self.semaphores = {}
+        self.speed = speed
+        self.color_counts = {}        
         self.work_order ={}
         self.cx, self.cy = 0, 0
         self.lastx, self.lasty = 0, 0
+        self.brush_size = 3
         self.z = -1
         self.coordinates = ()
         self.connection_thread = threading.Thread(target=self.connection, args=(self.chart,))
@@ -120,37 +151,40 @@ class SusBot():
         self.colorweights = {color: 0 for color in colors.keys()}
         self.colorfilter = set()
         self.logos = True
-        self.fill_patterns = [((0, 1),(0, -1),(1, 0),(-1,0)), # fill patterns for bucket tool
-                ((2, 1),(2, -1),(-2, 1),(-2, -1),(1, 2),(1, -2),(-1, 2),(-1,-2))]
-        self.labels = ["Pawn moves: stays inside borders", "Knight moves: jumps borders"]
+        self.flag = True
         self.current_pattern_index = 0
+        self.material_1 = labels[random.choice(list(colors.values()))]
+        self.material2 = labels[random.choice(list(colors.values()))]
+        self.names = [f"{self.material2} Miner Master", f"{self.material2} Drill Master",
+                      f'{self.material2} Shoveler', f'{self.material2} Earth mover',
+                      f'{self.material2} Chisel', f'{self.material2} Rock Ripper',
+                      f'{self.material2} Gem Cutter', f'{self.material2} Dirt Mover',
+                      f'{self.material2} Void Blaster']
+        self.mighty_wind_labels = ["Pawn: stays within state or country borders", f" ~ ~* ~ ~* ~ ~* ~ \n ᴌꞁⱠᛚꞀ {self.material_1} Knight Lɭ|\ \n   explores the lands . . ."]
+        self.mighty_wind_labels2 = ["\n   +Pawn+", f"\n   Knight ꞀL"]
+        self.mighty_wind_labels_flag = False
+        self.fill_patterns = [((0, 1),(0, -1),(1, 0),(-1,0)),
+        ((2, 1),(2, -1),(-2, 1),(-2, -1),(1, 2),(1, -2),(-1, 2),(-1,-2))]
+
+        # get queue ready
         self.queue = queue.LifoQueue()
+
+        # set up the gui window, part 2
         self.label_frame = Frame(self.root)
         self.label_frame.pack(side='left')
         self.update_labels()
         self.root.wm_attributes("-topmost", True)
         self.root.overrideredirect(True)
+
+        # load hotkeys
+        self.hotkey_preload()
+        self.hotkeys()
+   
+        # start gui
         self.root.mainloop()
         
-    def toggle_logos(self): #toggles guild war logos on and off
-        if self.logos == True:
-            for lg in range(10):
-                try:
-                    driver.execute_script("arguments[0].style.display = 'none';",driver.find_element(By.XPATH,f'//*[@id="areas"]/div[{lg}]'))
-                    driver.execute_script("arguments[0].style.display = 'none';",driver.find_element(By.XPATH,f'/html/body/div[3]/div[1]/div[2]/div/a[{lg}]'))
-                except:
-                    pass
-            self.logos = False
-        else:
-            for lg in range(10):
-                try:
-                    driver.execute_script("arguments[0].style.display = 'block';",driver.find_element(By.XPATH,f'//*[@id="areas"]/div[{lg}]'))
-                    driver.execute_script("arguments[0].style.display = 'inline';",driver.find_element(By.XPATH,f'/html/body/div[3]/div[1]/div[2]/div/a[{lg}]'))
-                except:
-                    pass
-            self.logos = True
-        time.sleep(speed * 3)
-        
+    # keybindings:
+    
     def hotkey_preload(self):
         self.amogus_key = 'e'
         self.toggle_logos_key = '='
@@ -162,15 +196,16 @@ class SusBot():
         self.copykey = 'f8'
         self.pastekey = 'f9'
         self.windkey = 'shift+v'
-        self.toggle_wind_pattern_key = 'b'
+        self.toggle_pattern_key = 'b'
         self.downspeed = 'shift+insert'
         self.upspeed = 'shift+del'
-        self.fillborderskey = 'b'
+        self.fillborderskey = 's'
         self.sample_colors_key='`'
         
-        # SET YOUR HOTKEY DESCRIPTIONS HERE:
+        # key descriptions:
+        
         controls = ['',
-            "Controls:",
+            " Controls:",
             '',
             f'  {self.sample_colors_key}   hold/drag/release to get areas colors',
             f'  {self.sample_colors_key}   tapping will move the color menu',
@@ -184,7 +219,7 @@ class SusBot():
             f'  {self.linekey}   hold/drag/release to draw line',
             f'  {self.circle_fill_key}   hold/drag/release to draw circle',
             f'  {self.windkey}   pour bucket',
-            f'  {self.toggle_wind_pattern_key}   toggle bucket pattern',
+            f'  {self.toggle_pattern_key}   toggle bucket pattern',
             '',
             f'  {self.fillborderskey}   hold/drag/release over an area to draw borders',
             f'  {self.river_bend_key}   hold/drag/release to draw bendable line',
@@ -199,30 +234,50 @@ class SusBot():
 
             f'  {stop_key}   this will stop all painting jobs',
             '',
-            '# ~ ~ ~ ~ ~* ~* ~ ~*','']
+            ' # ~ ~ ~ ~ ~* ~* ~ ~*','']
         for control in controls:
             print(control)
-            
-    def hotkey_handler(self, key, function_name, *args):
-        semaphore.acquire()
-        thread = Thread(target=getattr(self, function_name), args=(key, *args))
-        thread.start()
-        thread.join()
-        semaphore.release()
 
+    # set up managers for threading and hotkey synchronization
+
+    def semaphore_handler(self, semaphore):
+        if semaphore not in self.semaphores:
+            self.semaphores[semaphore] = Semaphore(semaphore)
+        return self.semaphores[semaphore]
+        
+    def hotkey_handler(self, key, function_name, semaphore, *args):
+        semaphore = self.semaphore_handler(semaphore)
+        if not semaphore.acquire(blocking=False):
+            if not self.flag:
+                function_name = f"{function_name}"
+                function_name = function_name.replace("_", " ")
+                print(f"\n {function_name.capitalize()}ing... \n")
+                print(f"\n {function_name.capitalize()}ing... \n")
+                time.sleep(speed*5)
+                self.flag = True
+        else:
+            self.flag = False
+            thread = Thread(target=getattr(self, function_name), args=(key, *args))
+            thread.start()
+            thread.join()
+            semaphore.release()
+
+    # bind hotkeys to functions
+            
     def hotkeys(self):
-        keyboard.add_hotkey(self.amogus_key,lambda:self.amogus())
-        keyboard.add_hotkey(self.toggle_logos_key,lambda:self.toggle_logos())
-        keyboard.add_hotkey(self.linekey,lambda:Thread(target=partial(self.hotkey_handler, self.linekey, "thick_line", 1)).start())
-        keyboard.add_hotkey(self.circle_fill_key, lambda: Thread(target=partial(self.hotkey_handler, self.circle_fill_key, 'circle_fill')).start())
-        keyboard.add_hotkey(self.copykey,lambda:  self.copypaste(self.copykey))            
-        keyboard.add_hotkey(self.pastekey,lambda:  Thread(target=partial(self.hotkey_handler, self.pastekey, 'copypaste')).start())
-        keyboard.add_hotkey(self.windkey,lambda: Thread(target=partial(self.hotkey_handler, self.windkey, 'mighty_wind')).start())                            
-        keyboard.add_hotkey(self.fillborderskey,lambda:Thread(target=partial(self.hotkey_handler, self.fillborderskey, 'border_helper')).start())                            
+        keyboard.add_hotkey(self.amogus_key, lambda: Thread(target=partial(self.hotkey_handler, self.amogus_key, 'amogus', 12)).start())        
+        keyboard.add_hotkey(self.toggle_pattern_key,lambda:  Thread(target=partial(self.hotkey_handler, self.toggle_pattern_key, 'toggle_pattern', 1)).start())
+        keyboard.add_hotkey(self.toggle_logos_key,lambda:Thread(target=partial(self.hotkey_handler, self.toggle_logos_key, 'toggle_logos', 1)).start())
+        keyboard.add_hotkey(self.linekey,lambda:Thread(target=partial(self.hotkey_handler, self.linekey, "thick_line", 6)).start())
+        keyboard.add_hotkey(self.circle_fill_key, lambda: Thread(target=partial(self.hotkey_handler, self.circle_fill_key, 'circle_fill', semaphore=10)).start())
+        keyboard.add_hotkey(self.copykey,lambda:  self.copypaste(self.copykey))         
+        keyboard.add_hotkey(self.pastekey,lambda:  Thread(target=partial(self.hotkey_handler, self.pastekey, 'copypaste', 3)).start())
+        keyboard.add_hotkey(self.windkey,lambda: Thread(target=partial(self.hotkey_handler, self.windkey, 'mighty_wind', 16)).start())                            
+        keyboard.add_hotkey(self.fillborderskey,lambda:Thread(target=partial(self.hotkey_handler, self.fillborderskey, 'border_helper',semaphore=7)).start())                            
         keyboard.add_hotkey(self.sample_colors_key, lambda:Thread(target=partial(self.sample_colors)).start())                            
-        keyboard.add_hotkey(self.darken_key,lambda:Thread(target=partial(self.hotkey_handler, self.darken_key, 'transparent_circle')).start())                            
-        keyboard.add_hotkey(self.lighten_key,lambda:Thread(target=partial(self.hotkey_handler, self.lighten_key, 'transparent_circle')).start())                            
-        keyboard.add_hotkey(self.river_bend_key,lambda:self.river_bend(self.river_bend_key))           
+        keyboard.add_hotkey(self.darken_key,lambda:Thread(target=partial(self.hotkey_handler, self.darken_key, 'transparent_circle', 4)).start())                            
+        keyboard.add_hotkey(self.lighten_key,lambda:Thread(target=partial(self.hotkey_handler, self.lighten_key, 'transparent_circle', 4)).start())                            
+        keyboard.add_hotkey(self.river_bend_key, lambda: Thread(target=partial(self.hotkey_handler, self.river_bend_key, 'river_bend', 1)).start()) 
         keyboard.add_hotkey(self.downspeed, lambda: self.change_speed(self.downspeed))
         keyboard.add_hotkey(self.upspeed, lambda: self.change_speed(self.upspeed))
         for i in range(1, 10):
@@ -230,77 +285,38 @@ class SusBot():
             keyboard.add_hotkey(f'shift+{i}', lambda i=i: Thread(target=self.adjust_weights(-i)).start())
         keyboard.add_hotkey('shift+~', lambda: Thread(target=self.adjust_weights('half')).start())
         
-    def emitsleep(self, x, y, color = None):
-        try:
-            self.queue.put((x, y, color))        
-            x, y, color = self.queue.get(block=False)
-            if color == None:
-                color = self.random_weighted_color()
-            if x > 0 and x < self.width and y > 0 and y < self.height:
-                if self.cache[x, y] not in [colors_reverse[color]] + null + [i for i in self.colorfilter]:
-                    lock.acquire()
-                    sio.emit('p',[x, y, color, 1])
-                    if keyboard.is_pressed(stop_key):
-                        self.queue = queue.LifoQueue()
-                    time.sleep(self.speed - (self.start - time.perf_counter()))
-                    self.start = time.perf_counter()
-                    lock.release()
-                    return True
-                else:
-                    return False
-            else:
-                return False
-        except:
-            return False
-        
-    def random_weighted_color(self):
-        color_weights = self.colorweights
-        total_weight = sum(weight for color, weight in color_weights.items())
-        try:
-          color_weights = {color:weight/total_weight for color,weight in color_weights.items()}
-        except:
-          color = self.return_color()
-          return color
-        color = random.choices(list(colors_reverse.keys()),weights=color_weights.values(), k=1)
-        return color[0]
-    
-    def get_darkest_lightest_rgb(self, color_weights):
-        def brightness(color_weight):
-            color, weight = color_weight
-            return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]
-        color_weights = {color: weight for color, weight in self.colorweights.items() if color in self.colorfilter}
-        sorted_color_weights = sorted(color_weights.items(), key=brightness)
-        n = len(sorted_color_weights)
-        light_colors = sorted_color_weights[:n//2]
-        dark_colors = sorted_color_weights[n//2:]
+    # amogus
 
-        light_color = random.choices([color for color, weight in light_colors],
-                                     weights=[weight for color, weight in light_colors], k=1)
-        dark_color = random.choices([color for color, weight in dark_colors],
-                                    weights=[weight for color, weight in dark_colors], k=1)
-        return light_color[0], dark_color[0]
-
-
-    def amogus(self): # 4-way directional (awesome, I know)
+    def amogus(self, key):
         try:
+            # Start the timer for pacing the pixel output
             self.start = time.perf_counter()
+
+            # Get the mouse coordinates
             X, Y = self.xy()
+
+            # Set the character's direction
             facing_right = X >= self.lastx
             facing_up = Y <= self.lasty
+            
+            # Draw the visor
             if facing_right and facing_up:
-                self.emitsleep(X + 1, Y, 38)
+                self.emitsleep(X + 1, Y, 36)
+                if keyboard.is_pressed(stop_key):
+                    return
             elif facing_right and not facing_up:
                 for n in range(2):
                     self.emitsleep(X + (-n * self.z), Y, 38 if facing_right else 37)
             elif not facing_right and facing_up:
-                self.emitsleep(X - 1, Y, 37)
+                self.emitsleep(X - 1, Y, 35)
             else:
                 for n in range(2):
                     self.emitsleep(X + (n * self.z), Y, 38 if facing_right else 37)
 
+            # Create the body and backpack variations
             x = X + (self.z if facing_right else -1)
             y = Y + (2 if facing_up else -2)
-            
+        
             body_main_right_up = [(-1,-1),(0,-1),(1,-1),(0,0),(0,1),(1,1),(-1,2),(1,2),]
             backpack_right_up = [(-1,0),(-2,0),(-2,1),(-1,1),]
 
@@ -312,7 +328,8 @@ class SusBot():
             
             body_main_left_down = [(x * -1, y) for x, y in body_main_right_down]
             backpack_left_down = [(x * -1, y) for x, y in backpack_right_down]
-            
+
+            # check the last location data to determine which body and backpack to use
             if facing_right and facing_up:
                 body = body_main_right_up
                 backpack = backpack_right_up
@@ -325,40 +342,43 @@ class SusBot():
             else:
                 body = body_main_left_down
                 backpack = backpack_left_down
-            clothes_colors = self.get_darkest_lightest_rgb(self.colorfilter)
+
+            # pick the color of the body and backpack
+            try:
+                clothes_colors = self.get_darkest_lightest_rgb(self.colorfilter)
+            except:
+                color = self.return_color()
+
+            # send the coordinate and color data to the server
             for n in body:
-                self.emitsleep(n[0]+X, n[1]+Y, colors[clothes_colors[1]] if self.colorfilter else None)
+                self.emitsleep(n[0]+X, n[1]+Y, colors[clothes_colors[1]] if self.colorfilter else color)
             for n in backpack:
-                self.emitsleep(n[0]+X, n[1]+Y, colors[clothes_colors[0]] if self.colorfilter else None)
+                self.emitsleep(n[0]+X, n[1]+Y, colors[clothes_colors[0]] if self.colorfilter else color)
+
+            # save the location data to memory for the next one to access
             self.lastx, self.lasty = X, Y
         except:
             pass
         
-    def sample_colors(self):
+    # draw a circle starting from outer perimeter, cancel early for outline only
+        
+    def circle_fill(self, key):
+        self.start = time.perf_counter()
         try:
-            self.update_window_pos()
-            end, start = self.zone(self.sample_colors_key)
+            start, end = self.zone(key)    
             x2, y2 = start
             x1, y1 = end
-            r = int(math.sqrt((x2-x1)**2 + (y2-y1)**2))
-            coords = self.spiral_coords(start, r)
-            color_count = {}  # create a dictionary to store the color occurrences
-            for coord in coords:
-                if self.cache[coord[0], coord[1]]:
-                    color = self.cache[coord[0], coord[1]]  # get the color at the current coord
-                else:
-                    continue
-                if color == (204, 204, 204):  # check if the color is (204, 204, 204)
-                    continue  # skip this iteration if the color is (204, 204, 204)
-                if color in color_count:
-                    color_count[color] += 1  # increase the count if the color already exists in the dictionary
-                else:
-                    color_count[color] = 1  # add the color to the dictionary with a count of 1
-            for color, count in color_count.items():
-                self.colorweights[color] += count  # increase the weight for each color by the count of that color
-            self.reduce_weights()
+            r = int((((x2-x1)**2 + (y2-y1)**2))**0.5)
+            self.coordinates  = self.spiral_order([(x,y) for x in range(x1-r, x1+r+1) for y in range(y1-r, y1+r+1) if ((x-x1)**2 + (y-y1)**2)**0.5 <= r], x1, y1)
+            for c in self.coordinates:
+                self.emitsleep(c[0],c[1])
+                if keyboard.is_pressed(stop_key):
+                    return
+            self.coordinates = ()
         except:
             pass
+
+    # draw a spiraling circle that darkens or lightens an area
         
     def transparent_circle(self, key):
         self.start = time.perf_counter()
@@ -381,7 +401,9 @@ class SusBot():
                     self.emitsleep(coord[0], coord[1], self.color_shift(self.cache[coord[0], coord[1]], 1))
         except:
             pass
-        
+
+    # draw a road or river bend
+    
     def river_bend(self, key):
         self.start = time.perf_counter()
         try:
@@ -392,6 +414,7 @@ class SusBot():
             control_stack = []
             while keyboard.is_pressed(key):
                 control_stack.append((self.xy()))
+                time.sleep(speed)
             end = self.xy()
             control_average = []
             control_average.extend(self.coordinate_list_average(control_stack, start, end))
@@ -407,7 +430,9 @@ class SusBot():
                             return
         except:
             pass
-        
+
+    # copy or paste area
+    
     def copypaste(self, key):
         self.start = time.perf_counter()
         try:
@@ -437,12 +462,8 @@ class SusBot():
         except:
             pass
 
-    def toggle_pattern(self): # change the pattern of the mighty_wind fill bucket tool
-        self.current_pattern_index = (self.current_pattern_index + 1) % len(self.fill_patterns)
-        self.current_fill_pattern = self.fill_patterns[self.current_pattern_index]
-        print(self.labels[self.current_pattern_index])
-        time.sleep(speed * 3)
-    
+    # fill bucket tool
+        
     def mighty_wind(self, key):
         self.start = time.perf_counter()
         locs = set()            
@@ -450,15 +471,15 @@ class SusBot():
           locs.add(self.xy())
         locate()        
         while len(set(locs)) > 0:
-            if keyboard.is_pressed(self.toggle_wind_pattern_key):
-                self.toggle_pattern()
             if keyboard.is_pressed(stop_key):
                 return
             x, y = locs.pop()
             if self.emitsleep(x, y):
                 for i in self.fill_patterns[self.current_pattern_index]:
                     locs.add((i[0]+x, i[1]+y))
-        
+
+    # border maker tool
+    
     def border_helper(self, key):
         self.start = time.perf_counter()
         try:
@@ -476,24 +497,10 @@ class SusBot():
                 self.emitsleep(i[0], i[1])
         except:
             pass
-    
-    def circle_fill(self, key):
-        self.start = time.perf_counter()
-        try:
-            start, end = self.zone(key)    
-            x2, y2 = start
-            x1, y1 = end
-            r = int((((x2-x1)**2 + (y2-y1)**2))**0.5)
-            self.coordinates  = self.spiral_order([(x,y) for x in range(x1-r, x1+r+1) for y in range(y1-r, y1+r+1) if ((x-x1)**2 + (y-y1)**2)**0.5 <= r], x1, y1)
-            for c in self.coordinates:
-                self.emitsleep(c[0],c[1])
-                if keyboard.is_pressed(stop_key):
-                    return
-            self.coordinates = ()
-        except:
-            pass
 
-    def thick_line(self, key, width):
+    # line tool, change the width in the parameter width=4 below to your preference int
+
+    def thick_line(self, key, width=4):
         self.start = time.perf_counter()
         try:
             set1 = set()
@@ -523,7 +530,108 @@ class SusBot():
                 self.emitsleep(c[0],c[1])
         except:
             pass
-               
+        
+    # emit pixel data to server in synchronized form to prevent exceeding speed limit
+
+    def emitsleep(self, x, y, color = None):
+        try:
+            self.queue.put((x, y, color))        
+            x, y, color = self.queue.get(block=False)
+            if color == None:
+                color = self.random_weighted_color()
+            if x >= 0 and x <= self.width - 1 and y >= 0 and y <= self.height - 1:
+                if self.cache[x, y] not in [colors_reverse[color]] + null + [i for i in self.colorfilter]:
+                    lock.acquire()
+                    sio.emit('p',[x, y, color, 1])
+                    if keyboard.is_pressed(stop_key):
+                        self.queue = queue.LifoQueue()
+                    time.sleep(self.speed - (self.start - time.perf_counter()))
+                    self.start = time.perf_counter()
+                    lock.release()
+                    return True
+                else:
+                    return False
+            else:
+                return False
+        except:
+            return False
+        
+    # change the full bucket pattern between Pawn or Knight
+
+    def toggle_pattern(self, key): # change the pattern of the mighty_wind fill bucket tool
+        self.current_pattern_index = (self.current_pattern_index + 1) % len(self.fill_patterns)
+        self.current_fill_pattern = self.fill_patterns[self.current_pattern_index]
+        if self.mighty_wind_labels_flag == False:
+            print(f'\n With their trusty {random.choice(self.names)}{random.choice(("-XL","-3000"," 555"," Ultra"," Pro","-LX1"," Limited by their side, the","by their side"))},\n    The')
+            print(self.mighty_wind_labels[self.current_pattern_index])
+            print(f'  - Press {self.windkey} to pour bucket.')
+            print(f'  - {self.toggle_pattern_key} toggles spread.')
+            self.mighty_wind_labels_flag = True
+        else:
+            print(f'{self.mighty_wind_labels2[self.current_pattern_index]}')
+        time.sleep(speed * 3)
+        
+    # pick a random color based on the weights of your chosen colors
+        
+    def random_weighted_color(self):
+        color_weights = self.colorweights
+        total_weight = sum(weight for color, weight in color_weights.items())
+        try:
+          color_weights = {color:weight/total_weight for color,weight in color_weights.items()}
+        except:
+          color = self.return_color()
+          return color
+        color = random.choices(list(colors_reverse.keys()),weights=color_weights.values(), k=1)
+        return color[0]
+
+    # get the lightest and darkest values from a list of rgb colors
+    
+    def get_darkest_lightest_rgb(self, color_weights):
+        def brightness(color_weight):
+            color, weight = color_weight
+            return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]
+        color_weights = {color: weight for color, weight in self.colorweights.items() if color in self.colorfilter}
+        sorted_color_weights = sorted(color_weights.items(), key=brightness)
+        n = len(sorted_color_weights)
+        light_colors = sorted_color_weights[:n//2]
+        dark_colors = sorted_color_weights[n//2:]
+
+        light_color = random.choices([color for color, weight in light_colors],
+                                     weights=[weight for color, weight in light_colors], k=1)
+        dark_color = random.choices([color for color, weight in dark_colors],
+                                    weights=[weight for color, weight in dark_colors], k=1)
+        return light_color[0], dark_color[0]
+
+    # grab the sums for every color in swiped the area
+        
+    def sample_colors(self):
+        try:
+            self.update_window_pos()
+            end, start = self.zone(self.sample_colors_key)
+            x2, y2 = start
+            x1, y1 = end
+            r = int(math.sqrt((x2-x1)**2 + (y2-y1)**2))
+            coords = self.spiral_coords(start, r)
+            color_count = {}  # create a dictionary to store the color occurrences
+            for coord in coords:
+                if self.cache[coord[0], coord[1]]:
+                    color = self.cache[coord[0], coord[1]]  # get the color at the current coord
+                else:
+                    continue
+                if color == (204, 204, 204):  # check if the color is (204, 204, 204)
+                    continue  # skip this iteration if the color is (204, 204, 204)
+                if color in color_count:
+                    color_count[color] += 1  # increase the count if the color already exists in the dictionary
+                else:
+                    color_count[color] = 1  # add the color to the dictionary with a count of 1
+            for color, count in color_count.items():
+                self.colorweights[color] += count  # increase the weight for each color by the count of that color
+            self.reduce_weights()
+        except:
+            pass
+        
+    # update the gui labels
+    
     def update_labels(self):
         try:
             for widget in self.label_frame.winfo_children():
@@ -556,6 +664,8 @@ class SusBot():
         except:
             pass
 
+    # helper methods for adjusting colorweights
+
     def adjust_colorweight(self, event, color):
         if event.delta > 0:
             self.colorweights[color] += 1
@@ -563,7 +673,21 @@ class SusBot():
             self.colorweights[color] -= 1
             if self.colorweights[color] < 0:
                 self.colorweights[color] = 0
-        
+
+    def reduce_weights(self):
+        try:
+            non_zero_weights = {color: weight for color, weight in self.colorweights.items() if weight > 0}
+            gcd = non_zero_weights[next(iter(non_zero_weights))]
+            for weight in non_zero_weights.values():
+                gcd = math.gcd(gcd, weight)
+            if gcd > 1:
+                for color in non_zero_weights:
+                    self.colorweights[color] = self.colorweights[color] // gcd
+                return True
+            return False
+        except:
+            pass
+
     def half_color_filter(self, color):
         self.colorweights[color] = self.colorweights[color] // 2
 
@@ -574,7 +698,9 @@ class SusBot():
             color = colors_reverse[self.return_color()]              
             self.colorweights[color] = max(0, self.colorweights[color] + char)
             time.sleep(self.speed*5)
-        
+
+    # helper methods for clearing colorweights
+    
     def clear_colorweights(self, char):
         if char == 'clear':
             for color in self.colorweights:
@@ -590,15 +716,21 @@ class SusBot():
         
     def set_colorweight_to_zero(self, color):
         self.colorweights[color] = 0
+        
+    # helper methods for updating colorweights
             
     def update_colorfilter(self):
         self.colorfilter.clear()
         for color, weight in self.colorweights.items():
             if weight > 0:
-                self.colorfilter.add(color) 
+                self.colorfilter.add(color)
+
+    # helper methods for detecting rgb brightness values
         
     def rgb_to_brightness(self, rgb):
-        return int(0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2])    
+        return int(0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2])
+
+    # update the gui window position when called self.update_window_pos()
 
     def update_window_pos(self):
         mouse_x = self.root.winfo_pointerx()
@@ -610,36 +742,13 @@ class SusBot():
         self.root.geometry(f"{width}x{height}+{mx-200}+{my}")
         self.root.update()
 
-    def reduce_weights(self):
-        try:
-            non_zero_weights = {color: weight for color, weight in self.colorweights.items() if weight > 0}
-            gcd = non_zero_weights[next(iter(non_zero_weights))]
-            for weight in non_zero_weights.values():
-                gcd = math.gcd(gcd, weight)
-            if gcd > 1:
-                for color in non_zero_weights:
-                    self.colorweights[color] = self.colorweights[color] // gcd
-                return True
-            return False
-        except:
-            pass
-        
+
+    # coordinate helpers
+    
     def spiral_order(self, coordinates, center_x, center_y):
         coordinates = sorted(set(coordinates), key=lambda x: ((x[0]-center_x)**2 + (x[1]-center_y)**2)**0.5, reverse=True)
         return coordinates
-    
-    def zone(self, key):
-        x1, y1 = self.xy()
-        while True:
-            if not keyboard.is_pressed(key):
-                break
-        x2, y2 = self.xy()
-        return [x1, y1], [x2, y2]
-    
-    def get_color_name(self, rgb):
-        lista = labeled_colors
-        return lista[rgb]
-    
+        
     def spiral_coords(self, center, radius):
       x, y = center
       coords = []
@@ -666,20 +775,6 @@ class SusBot():
           if distance <= radius:
             coords.append((x, y))
       return coords
-                    
-    def change_speed(self, key):
-        if key == self.downspeed:
-            self.speed  += 0.001
-            self.speed  = float('%.3f'%self.speed)
-        elif key == self.upspeed:
-            self.speed  -= 0.001
-            self.speed  = float('%.3f'%self.speed)
-        if self.speed < 0.0155:
-            print(f"Going too fast now, defaulting to {regular_speed} to prevent perma ban.")
-            self.speed = regular_speed
-        if self.speed == 0.016:
-            print(f"Warning: You are in speed throttling territory.")
-        print("Speed:", self.speed)
 
     def xy(self):
         try:
@@ -705,7 +800,22 @@ class SusBot():
             return int(x_sum/weight_sum), int(y_sum/weight_sum)
         except:
             pass
+        
+    def zone(self, key):
+        x1, y1 = self.xy()
+        while True:
+            if not keyboard.is_pressed(key):
+                break
+        x2, y2 = self.xy()
+        return [x1, y1], [x2, y2]
 
+
+    # color helpers
+    
+    def get_color_name(self, rgb):
+        lista = labeled_colors
+        return lista[rgb]
+    
     def get_color_index(self):
         try:
             cid = str(driver.find_element(By.XPATH,'/html/body/div[3]/div[2]').get_attribute("style"))
@@ -725,7 +835,7 @@ class SusBot():
         elif type(input1) == tuple:
             return colors[(input1)]
           
-    def color_shift(self, color, direction):
+    def color_shift(self, color, direction): # 1 or -1 for direction
         color_int = None
         for c, i in colors.items():
             if c == color or i == color:
@@ -736,7 +846,9 @@ class SusBot():
         next_color_int = (color_int + direction) % len(colors)
         if next_color_int not in colors.values():
             next_color_int = next(i % len(colors) for i in range(next_color_int+direction, next_color_int+len(colors)*direction, direction) if i % len(colors) in colors.values())
-        return next_color_int    
+        return next_color_int
+
+    # map cache loader
           
     def load_map_into_cache(self, chart):
         with open(f'{self.chart}.png', 'wb') as f:
@@ -748,7 +860,22 @@ class SusBot():
         self.image.save(f'{self.chart}.png')
         self.cache = self.image.load()
         print(f'Successfully loaded chart: {self.chart}')
-        
+
+    # auto-login helpers
+    
+    def visibility_state(self):
+        try:
+            vis = driver.execute_script("return document.visibilityState") == "visible"
+        except:
+            driver.switch_to.window(driver.window_handles[0])
+            vis = driver.execute_script("return document.visibilityState") == "visible"
+        if vis == False:
+            p = driver.current_window_handle
+            chwd = driver.window_handles
+            for w in chwd:
+                if(w!=p):
+                    driver.switch_to.window(w)
+                    
     def clear_cookies(self, url):
         driver.get(url)
         driver.delete_all_cookies()
@@ -767,8 +894,6 @@ class SusBot():
                 EC.element_to_be_clickable((By.XPATH,'/html/body/div[3]/div[8]/a[2]/div[3]/button[2]'))).click()
             print('Logged in.')
         except:
-            print('An error while trying to log in.')
-            print('Please proceed manually.')
             pass
       
     def auth_data(self):
@@ -783,7 +908,7 @@ class SusBot():
         def connect():
             self.chart = chart
             sio.emit("init",{"authKey":f"{self.authkey}","authToken":f"{self.authtoken}","authId":f"{self.authid}","boardId":self.chart})
-            threading.Timer(15, connect).start()
+            threading.Timer(15, connect).start()            
             
         @sio.on("p")        
         def update_pixels(p: tuple): 
@@ -793,19 +918,46 @@ class SusBot():
                         self.cache[i[0], i[1]] = colors_reverse[i[2]]
                 except:
                     pass
-                    
-    def visibility_state(self):
-        try:
-            vis = driver.execute_script("return document.visibilityState") == "visible"
-        except:
-            driver.switch_to.window(driver.window_handles[0])
-            vis = driver.execute_script("return document.visibilityState") == "visible"
-        if vis == False:
-            p = driver.current_window_handle
-            chwd = driver.window_handles
-            for w in chwd:
-                if(w!=p):
-                    driver.switch_to.window(w)
-                    
+                
+    # toggle guild war logos on or off with the toggle_logos_key you set earlier, by default the equals -> = <- sign
+        
+    def toggle_logos(self):
+        if self.logos == True:
+            for lg in range(10):
+                try:
+                    driver.execute_script("arguments[0].style.display = 'none';",driver.find_element(By.XPATH,f'//*[@id="areas"]/div[{lg}]'))
+                    driver.execute_script("arguments[0].style.display = 'none';",driver.find_element(By.XPATH,f'/html/body/div[3]/div[1]/div[2]/div/a[{lg}]'))
+                except:
+                    pass
+            self.logos = False
+        else:
+            for lg in range(10):
+                try:
+                    driver.execute_script("arguments[0].style.display = 'block';",driver.find_element(By.XPATH,f'//*[@id="areas"]/div[{lg}]'))
+                    driver.execute_script("arguments[0].style.display = 'inline';",driver.find_element(By.XPATH,f'/html/body/div[3]/div[1]/div[2]/div/a[{lg}]'))
+                except:
+                    pass
+            self.logos = True
+        time.sleep(speed * 3)
+        
+    # speed control helper
+    
+    def change_speed(self, key):
+        if key == self.downspeed:
+            self.speed  += 0.001
+            self.speed  = float('%.3f'%self.speed)
+        elif key == self.upspeed:
+            self.speed  -= 0.001
+            self.speed  = float('%.3f'%self.speed)
+        if self.speed < 0.0155:
+            print(f"Going too fast now, defaulting to {regular_speed} to prevent perma ban.")
+            self.speed = regular_speed
+        if self.speed == 0.016:
+            print(f"Warning: You are in speed throttling territory.")
+        print("Speed:", self.speed)
+
+
+# start the class as 'susbot'
 if __name__ == '__main__':
     susbot = SusBot()
+#end of the line, partner
