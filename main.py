@@ -5,7 +5,7 @@ import os
 import re
 import json
 import keyboard
-import socketio #requires: python-socketio[client]==4.6.1
+import socketio # requires: python-socketio[client]==4.6.1
 import random
 import time
 import urllib.request
@@ -90,7 +90,7 @@ color_values = list(colors.values())
 print('Loading SusBot, please stand-by...')
 
 # change the number of chart to the same as the map number you want to play on
-chart =  7
+chart =  7 
 
 # auto login True/False, requires Reddit account info in crewmate.py
 # - its in the same folder as susbots other files,
@@ -136,7 +136,7 @@ class SusBot():
             driver.get(f"https://pixelplace.io/{self.chart}")
         self.load_map_into_cache(self.chart)
         
-        #define a bunch of variables:
+        # define a bunch of variables:
         self.semaphores = {}
         self.speed = speed
         self.color_counts = {}        
@@ -155,12 +155,23 @@ class SusBot():
         self.current_pattern_index = 0
         self.material_1 = labels[random.choice(list(colors.values()))]
         self.material2 = labels[random.choice(list(colors.values()))]
-        self.names = [f"{self.material2} Miner Master", f"{self.material2} Drill Master",
-                      f'{self.material2} Shoveler', f'{self.material2} Earth mover',
-                      f'{self.material2} Chisel', f'{self.material2} Rock Ripper',
-                      f'{self.material2} Gem Cutter', f'{self.material2} Dirt Mover',
-                      f'{self.material2} Void Blaster']
-        self.mighty_wind_labels = ["Pawn: stays within state or country borders", f" ~ ~* ~ ~* ~ ~* ~ \n ᴌꞁⱠᛚꞀ {self.material_1} Knight Lɭ|\ \n   explores the lands . . ."]
+        self.names  =  [f"{self.material2} Miner Master", f"{self.material2} Drill Master",
+                        f'{self.material2} Shoveler', f'{self.material2} Earth Mover',
+                        f'{self.material2} Chisel', f'{self.material2} Rock Ripper',
+                        f'{self.material2} Gem Cutter', f'{self.material2} Dirt Mover',
+                        f'{self.material2} Void Blaster',f'{self.material2} Paintbrush',
+                        f'{self.material2} Pickaxe',f'{self.material2} Pistol',
+                        f"{self.material2} Longsword", f"{self.material2} Battle Axe",
+                        f"{self.material2} War Hammer", f"{self.material2} Spear",
+                        f"{self.material2} Shield", f"{self.material2} Halberd",
+                        f"{self.material2} Flail", f"{self.material2} Dagger",
+                        f"{self.material2} Broadsword", f"{self.material2} Scimitar",
+                        f"{self.material2} Wand", f"{self.material2} Magic Crystal",
+                        f"{self.material2} Enchanted Book", f"{self.material2} Magic Gem",
+                        f"{self.material2} Magic Amulet", f"{self.material2} Magic Ring",
+                        f"{self.material2} Dagger", f"{self.material2} Shield",
+                        f"{self.material2} Magic Potion", f"{self.material2} Magic Cloak"]
+        self.mighty_wind_labels = ["",f" \n        -ᴌꞁⱠᛚꞀ {self.material_1} Knight ꞀL \n\n    . . . embarks upon the lands . . .\n __̴ı̴̴̴ı̴̴̡ ̡̡ ̡ ̡̡ ̡͌l̡̡̡ ̡͌l̡*̡̡ ̴̡ı̴̴̡\n  ͡|̲̲̲͡͡͡ ̲▫̲̲͡͡͡ ̲▫̲͡ ̲̲̲͡͡π̲̲͡͡ ̲̲͡▫̲̲͡͡ ̲̲͡▫̲̲͡͡ ̲|̡̡̡l̡̡̡̡\n  ̴̡ı̴̴̡̡ı̴̡̡ ̡͌l̡̡̡̡.__̴̡̡ı̴__̴̡̡ı̴̡̡̡̡. Ꭿ\n ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ\n ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ\n ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ\n ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ\n ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ"]
         self.mighty_wind_labels2 = ["\n   +Pawn+", f"\n   Knight ꞀL"]
         self.mighty_wind_labels_flag = False
         self.fill_patterns = [((0, 1),(0, -1),(1, 0),(-1,0)),
@@ -202,8 +213,7 @@ class SusBot():
         self.fillborderskey = 's'
         self.sample_colors_key='`'
         
-        # key descriptions:
-        
+        # key descriptions:        
         controls = ['',
             " Controls:",
             '',
@@ -251,8 +261,7 @@ class SusBot():
             if not self.flag:
                 function_name = f"{function_name}"
                 function_name = function_name.replace("_", " ")
-                print(f"\n {function_name.capitalize()}ing... \n")
-                print(f"\n {function_name.capitalize()}ing... \n")
+                print(f"\n {function_name.capitalize()}'ing... \n")
                 time.sleep(speed*5)
                 self.flag = True
         else:
@@ -265,15 +274,15 @@ class SusBot():
     # bind hotkeys to functions
             
     def hotkeys(self):
-        keyboard.add_hotkey(self.amogus_key, lambda: Thread(target=partial(self.hotkey_handler, self.amogus_key, 'amogus', 12)).start())        
+        keyboard.add_hotkey(self.amogus_key, lambda: Thread(target=partial(self.hotkey_handler, self.amogus_key, 'amogus', 4)).start())        
         keyboard.add_hotkey(self.toggle_pattern_key,lambda:  Thread(target=partial(self.hotkey_handler, self.toggle_pattern_key, 'toggle_pattern', 1)).start())
         keyboard.add_hotkey(self.toggle_logos_key,lambda:Thread(target=partial(self.hotkey_handler, self.toggle_logos_key, 'toggle_logos', 1)).start())
-        keyboard.add_hotkey(self.linekey,lambda:Thread(target=partial(self.hotkey_handler, self.linekey, "thick_line", 6)).start())
-        keyboard.add_hotkey(self.circle_fill_key, lambda: Thread(target=partial(self.hotkey_handler, self.circle_fill_key, 'circle_fill', semaphore=10)).start())
+        keyboard.add_hotkey(self.linekey,lambda:Thread(target=partial(self.hotkey_handler, self.linekey, "thick_line", 3)).start())
+        keyboard.add_hotkey(self.circle_fill_key, lambda: Thread(target=partial(self.hotkey_handler, self.circle_fill_key, 'circle_fill', 10)).start())
         keyboard.add_hotkey(self.copykey,lambda:  self.copypaste(self.copykey))         
-        keyboard.add_hotkey(self.pastekey,lambda:  Thread(target=partial(self.hotkey_handler, self.pastekey, 'copypaste', 3)).start())
-        keyboard.add_hotkey(self.windkey,lambda: Thread(target=partial(self.hotkey_handler, self.windkey, 'mighty_wind', 16)).start())                            
-        keyboard.add_hotkey(self.fillborderskey,lambda:Thread(target=partial(self.hotkey_handler, self.fillborderskey, 'border_helper',semaphore=7)).start())                            
+        keyboard.add_hotkey(self.pastekey,lambda:  Thread(target=partial(self.hotkey_handler, self.pastekey, 'copypaste', 2)).start())
+        keyboard.add_hotkey(self.windkey,lambda: Thread(target=partial(self.hotkey_handler, self.windkey, 'mighty_wind', 8)).start())                            
+        keyboard.add_hotkey(self.fillborderskey,lambda:Thread(target=partial(self.hotkey_handler, self.fillborderskey, 'border_helper',7)).start())                            
         keyboard.add_hotkey(self.sample_colors_key, lambda:Thread(target=partial(self.sample_colors)).start())                            
         keyboard.add_hotkey(self.darken_key,lambda:Thread(target=partial(self.hotkey_handler, self.darken_key, 'transparent_circle', 4)).start())                            
         keyboard.add_hotkey(self.lighten_key,lambda:Thread(target=partial(self.hotkey_handler, self.lighten_key, 'transparent_circle', 4)).start())                            
@@ -500,7 +509,7 @@ class SusBot():
 
     # line tool, change the width in the parameter width=4 below to your preference int
 
-    def thick_line(self, key, width=4):
+    def thick_line(self, key, width=5):
         self.start = time.perf_counter()
         try:
             set1 = set()
@@ -558,14 +567,14 @@ class SusBot():
         
     # change the full bucket pattern between Pawn or Knight
 
-    def toggle_pattern(self, key): # change the pattern of the mighty_wind fill bucket tool
+    def toggle_pattern(self, key):
         self.current_pattern_index = (self.current_pattern_index + 1) % len(self.fill_patterns)
         self.current_fill_pattern = self.fill_patterns[self.current_pattern_index]
         if self.mighty_wind_labels_flag == False:
-            print(f'\n With their trusty {random.choice(self.names)}{random.choice(("-XL","-3000"," 555"," Ultra"," Pro","-LX1"," Limited by their side, the","by their side"))},\n    The')
+            print(f'\n With their trusty {random.choice(self.names)} by their side,\n    The legendary figure, known as the  ')
             print(self.mighty_wind_labels[self.current_pattern_index])
             print(f'  - Press {self.windkey} to pour bucket.')
-            print(f'  - {self.toggle_pattern_key} toggles spread.')
+            print(f'  - {self.toggle_pattern_key} toggle spread.')
             self.mighty_wind_labels_flag = True
         else:
             print(f'{self.mighty_wind_labels2[self.current_pattern_index]}')
@@ -742,7 +751,6 @@ class SusBot():
         self.root.geometry(f"{width}x{height}+{mx-200}+{my}")
         self.root.update()
 
-
     # coordinate helpers
     
     def spiral_order(self, coordinates, center_x, center_y):
@@ -808,7 +816,6 @@ class SusBot():
                 break
         x2, y2 = self.xy()
         return [x1, y1], [x2, y2]
-
 
     # color helpers
     
@@ -921,7 +928,7 @@ class SusBot():
                 
     # toggle guild war logos on or off with the toggle_logos_key you set earlier, by default the equals -> = <- sign
         
-    def toggle_logos(self):
+    def toggle_logos(self, key):
         if self.logos == True:
             for lg in range(10):
                 try:
