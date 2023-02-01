@@ -31,11 +31,11 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import win32api
+#import win32api
 
 # start driver class for web browser and socketio
 driver = webdriver.Firefox()
-driver.set_window_position((win32api.GetSystemMetrics(0)//3)*1,0)
+#driver.set_window_position((win32api.GetSystemMetrics(0)//3)*1,0)
 sio = socketio.Client()
 
 # create a threading lock for the pixel timing system
