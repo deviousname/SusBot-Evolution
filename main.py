@@ -172,10 +172,10 @@ chart = 7
 # - its in the same folder as susbots other files,
 # - just goto the folder and right click to edit it
 # - put your name and password inside the '' marks and save the file
-autologin = True
+autologin = False
 
 # speed settings
-regular_speed = 0.01400001 # 0.02 is good, will draw 1 pixel every 0.02 seconds
+regular_speed = 0.02 # 0.02 is good, will draw 1 pixel every 0.02 seconds
 speed = regular_speed # you can change the speed in game too
 
 # Emergency Stop Button:
