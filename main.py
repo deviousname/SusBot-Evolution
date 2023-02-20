@@ -151,19 +151,19 @@ titles = ['King', 'Queen', 'Jester', 'Pirate', 'Ninja', 'Knight', 'Assassin', 'R
 labeled_colors = {k: labels[v] for k, v in colors.items()}
 colors_reverse = {value: key for key, value in zip(colors.keys(), colors.values())}
 color_values = list(colors.values())
-print('    _____   _     _   _____')
-print('   /  ___| | |   | | /  ___|')
-print('   | |___  | |   | | | |___')
+print('    _____   _     _   _____  ')
+print('   /  ___| | |   | | /  ___| ')
+print('   | |___  | |   | | | |___  ')
 print('   \___  \ | |   | | \____ \ ')
 print('   ____| | | |___| |  ____| |')
-print('   \____/  \_______/  \____/')
-print('     ____    _____   ______')
-print('    /  _ |  /  _  | |__ __|')
-print('    | |/ /  | | | |   | |')
-print('    | |\ \  | | | |   | |')
-print('    | |_| | | |_| |   | |')
-print('    \____/  \____/    |_|')
-print(' ')
+print('   \____/  \_______/  \____/ ')
+print('     ____    _____   ______  ')
+print('    /  _ |  /  _  | |__ __|  ')
+print('    | |/ /  | | | |   | |    ')
+print('    | |\ \  | | | |   | |    ')
+print('    | |_| | | |_| |   | |    ')
+print('    \____/  \____/    |_|    ')
+print('                             ')
 
 # change the map number:
 chart = 7
