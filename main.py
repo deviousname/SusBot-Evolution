@@ -738,7 +738,6 @@ class SusBot():
         except:
             pass
         
-    # handle the lock toggle
     def double_color(self, color):
         self.colorweights[color] = self.colorweights[color] * 2
     
