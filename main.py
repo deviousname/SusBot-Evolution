@@ -172,10 +172,10 @@ chart = 7
 # - its in the same folder as susbots other files,
 # - just goto the folder and right click to edit it
 # - put your name and password inside the '' marks and save the file
-autologin = False
+autologin = True
 
 # speed settings
-regular_speed = 0.02 # 0.02 is good, will draw 1 pixel every 0.02 seconds
+regular_speed = 0.01337 # 0.02 is good, will draw 1 pixel every 0.02 seconds
 speed = regular_speed # you can change the speed in game too
 
 # Emergency Stop Button:
@@ -409,11 +409,17 @@ class SusBot():
     def draw_character(self, key):
         self.start = time.perf_counter()
         try:
+            try:
+                c1, c2 = self.get_darkest_lightest_rgb()
+            except:
+                c1, c2 = self.color, self.color                
             if not keyboard.is_pressed('shift'):
                 X, Y = self.xy()
                 letter = letters.get(key, ())
                 for x, y in letter:
-                    self.emitsleep(X + x, Y + y, priority=True, timer=True)
+                    self.emitsleep(X + x, Y + y, c2, priority=True, timer=True)
+                for x, y in letter:
+                    self.emitsleep(X + x, Y + y + 1, c1, priority=True, timer=True)
         except:
             pass
         
@@ -503,8 +509,7 @@ class SusBot():
             # save the location data to memory for the next one to access
             self.lastx, self.lasty = X, Y
         except:
-            pass
-        
+            pass        
 
     # get the lightest and darkest values from a list of rgb colors    
     def get_darkest_lightest_rgb(self):
@@ -1045,11 +1050,11 @@ class SusBot():
         with open(f'{self.chart}.png', 'wb') as f:
             f.write(requests.get(f'https://pixelplace.io/canvas/{chart}.png?t={random.randint(9999,99999)}').content)
         self.image = Image.open(f'{self.chart}.png').convert('RGB')
+        self.width, self.height = self.image.size
         if self.chart != 7:
             self.image.putpixel((self.width-1, self.height-1), (0, 0, 0))
         self.image.save(f'{self.chart}.png')
         self.cache = self.image.load()
-        self.width, self.height = self.image.size
         print(f' Successfully loaded chart: {self.chart}')
 
     # auto-login helpers    
@@ -1130,14 +1135,14 @@ class SusBot():
     # speed control helper    
     def change_speed(self, key):
         if key == self.downspeed:
-            self.speed  += 0.0000001
-            self.speed  = float('%.9f'%self.speed)
+            self.speed  += 0.00001
+            self.speed  = float('%.7f'%self.speed)
         elif key == self.upspeed:
-            self.speed  -= 0.0000001
-            self.speed  = float('%.9f'%self.speed)
-        if self.speed < 0.013:# 0.0155:
-            print(f"Going too fast now, defaulting to {0.01401} to prevent perma ban.")
-            self.speed = 0.014001
+            self.speed  -= 0.00001
+            self.speed  = float('%.7f'%self.speed)
+        if self.speed < 0.013:
+            print(f"Going too fast now, defaulting to {0.016} to prevent perma ban.")
+            self.speed = 0.016
         if self.speed <= 0.013999:
             print(f"Warning: You are in speed throttling territory.")
         print("Speed:", self.speed)
@@ -1209,7 +1214,7 @@ letters= {
             
             'm': {(-2, -2),                      (2, -2),
                   (-2, -1),(-1, -1),     (1, -1),(2, -1),
-                  (-2, 0),       (0, 0),       (2, 0),
+                  (-2, 0),        (0, 0),         (2, 0),
                   (-2, 1),                        (2, 1),},
              
             'n': {(-1, -2),             (2, -2),
@@ -1280,3 +1285,4 @@ letters= {
 if __name__ == '__main__':
     # create 'SusBot' instance
     susbot = SusBot()
+#END OF THE LINE, PARTNER
