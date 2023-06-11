@@ -230,15 +230,21 @@ class SusBot():
         self.flag = True
         self.colorfilter = set()
         
-        #colorweights init and random items:   
+        # colorweights init and random items:   
         self.colorweights = {color: random.randint(0, 1) for color in colors.keys()}
         self.colorweights = {color: random.randint(0, 1) if self.colorweights[color] > 0 else 0 for color in colors.keys()}
-        self.colorweights = {color: random.randint(-total, total) if self.colorweights[color] > 0 else 0 for color in colors.keys()}
-        self.titleweights = {title: random.randint(-total, total) for title in titles}
-        self.material_1_weighted = labels[random.choices(list(colors_reverse.keys()),weights=self.colorweights.values(), k=1)[0]]
-        self.material_2_weighted = labels[random.choices(list(colors_reverse.keys()),weights=self.colorweights.values(), k=1)[0]]
-        self.material_3_weighted = labels[random.choices(list(colors_reverse.keys()),weights=self.colorweights.values(), k=1)[0]]        
-        self.weighted_title = titles[random.choices(list(colors_reverse.keys()),weights=self.titleweights.values(), k=1)[0]]
+        self.colorweights = {color: random.randint(0, total) if self.colorweights[color] > 0 else 0 for color in colors.keys()}
+        self.titleweights = {title: random.randint(0, total) for title in titles}
+        try:
+            self.material_1_weighted = labels[random.choices(list(colors_reverse.keys()),weights=self.colorweights.values(), k=1)[0]]
+            self.material_2_weighted = labels[random.choices(list(colors_reverse.keys()),weights=self.colorweights.values(), k=1)[0]]
+            self.material_3_weighted = labels[random.choices(list(colors_reverse.keys()),weights=self.colorweights.values(), k=1)[0]]        
+            self.weighted_title = titles[random.choices(list(colors_reverse.keys()),weights=self.titleweights.values(), k=1)[0]]
+        except:
+            self.material_1_weighted = 'error'
+            self.material_2_weighted = 'error'
+            self.material_3_weighted = 'error'
+            self.weighted_title = 'error'
         self.names  =  [f"{self.material_2_weighted} Miner Master", f"{self.material_2_weighted} Drill Master",
                         f'{self.material_2_weighted} Shoveler', f'{self.material_2_weighted} Earth Mover',
                         f'{self.material_2_weighted} Chisel', f'{self.material_2_weighted} Rock Ripper',
