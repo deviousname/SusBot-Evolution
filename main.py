@@ -1,5 +1,4 @@
-#Susbot Evolution
-import crewmate
+#Susbot Evolution, by deviousname
 import requests
 import os
 import re
@@ -28,18 +27,32 @@ from collections import Counter, deque
 from ast import literal_eval as make_tuple
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+import bisect
+from scipy.stats import norm
 
-#pygame.init()
+# change the map number:
+chart = 7
+
+# speed settings
+regular_speed = 0.015 # 0.02 is good, will draw 1 pixel every 0.02 seconds
+speed = regular_speed # you can change the speed in game too
+
+# Emergency Stop Button:
+# - this will stop all threads
+# - and await your next command
+stop_key = 'shift+d'
+
 print('')
 class Item:
     def __init__(self):
         self.actions = {
             "acquired": ["swindled", "snatched", "claimed", "seized", "secured"],
             "bought": ["conned", "acquired", "procured", "obtained", "stole"],
-            "stole": ["swiped", "lifted", "pinched", "pirated", '"Borrowed"'],
+            "stole": ["swiped", "lifted", "pinched", "pirated", '"borrowed"'],
         }
         self.descriptors = {
             "worn": ["Ꭿ battered", "Ꭿ tattered", "ඞ worn", "Ꭿ weathered","ꇺ damaged"],
@@ -99,7 +112,10 @@ print('\n   (n0 r3fUnD$)\n')
 
 # start driver class for web browser and socketio
 sio = socketio.Client()
-driver = webdriver.Firefox()
+
+firefox_options = Options()
+firefox_options.binary_location = r'C:\Program Files\Mozilla Firefox\firefox.exe'
+driver = webdriver.Firefox(options=firefox_options)
 
 # create locks
 lock = threading.Lock()
@@ -147,10 +163,20 @@ labels = ['Snow', 'Silver', 'Iron', 'Steel', 'Titanium', 'Outer Space', 'Dark Ju
           'Blood', 'Grapefruit', 'Amenthyst',
           'Deep Sea', 'Emerald', 'Concrete',
           'Woodland',]
-titles = ['King', 'Queen', 'Jester', 'Pirate', 'Ninja', 'Knight', 'Assassin', 'Rook', 'Pawn', 'Bishop', 'Angel', 'Artist', 'Pharoah', 'Sultan', 'Behemoth', 'Demon', 'Lawyer', 'Adventurer', 'Viking', 'Samurai', 'Mage', 'Witch', 'Dwarf', 'Elf', 'Orc', 'Goblin', 'Dragon', 'Centaur', 'Minotaur', 'Gargoyle', 'Hydra','Champion', 'Sorcerer', 'Paladin', 'Archer', 'Druid', 'Bard', 'Necromancer', 'Enchanter', 'Warrior', 'Maid', 'Valkyrie', 'Shaman', 'Cleric', 'Berserker', 'Ranger', 'Thief', 'Rogue', 'Summoner', 'Alchemist']
+
+titles = ['King', 'Queen', 'Jester', 'Pirate', 'Ninja', 'Knight', 'Assassin',
+          'Rook', 'Pawn', 'Bishop', 'Angel', 'Artist', 'Pharoah', 'Sultan',
+          'Behemoth', 'Demon', 'Lawyer', 'Adventurer', 'Viking', 'Samurai',
+          'Mage', 'Witch', 'Dwarf', 'Elf', 'Orc', 'Goblin', 'Dragon',
+          'Centaur', 'Minotaur', 'Gargoyle', 'Hydra','Champion', 'Sorcerer',
+          'Paladin', 'Archer', 'Druid', 'Bard', 'Necromancer', 'Enchanter',
+          'Warrior', 'Maid', 'Valkyrie', 'Shaman', 'Cleric', 'Berserker',
+          'Ranger', 'Thief', 'Rogue', 'Summoner', 'Alchemist']
+
 labeled_colors = {k: labels[v] for k, v in colors.items()}
 colors_reverse = {value: key for key, value in zip(colors.keys(), colors.values())}
 color_values = list(colors.values())
+
 print('    _____   _     _   _____  ')
 print('   /  ___| | |   | | /  ___| ')
 print('   | |___  | |   | | | |___  ')
@@ -165,43 +191,20 @@ print('    | |_| | | |_| |   | |    ')
 print('    \____/  \____/    |_|    ')
 print('                             ')
 
-# change the map number:
-chart = 7
-
-# auto login True/False, requires Reddit account info in crewmate.py
-# - its in the same folder as susbots other files,
-# - just goto the folder and right click to edit it
-# - put your name and password inside the '' marks and save the file
-autologin = False
-
-# speed settings
-regular_speed = 0.02 # 0.02 is good, will draw 1 pixel every 0.02 seconds
-speed = regular_speed # you can change the speed in game too
-
-# Emergency Stop Button:
-# - this will stop all threads
-# - and await your next command
-stop_key = 'shift+d'
-
 # set up the main bot class
 class SusBot():
 
     # initiliaze class variables    
     def __init__(self): # . . .
         self.chart = chart
-         
+        self.speed = speed
+        
         # set up the gui window, part 1
         self.root = tk.Tk()
         self.root.title("SusBot: Evolution")
-
-        # automate login to website        
-        if autologin == True:
-            print(' Logging in. Please stand by...')
-            self.login()
-        else:
-            print(' Please log in.')
-            driver.get(f"https://pixelplace.io/{self.chart}")
         self.authid, self.authtoken, self.authkey = None, None, None
+        print(' Please log in.')
+        driver.get(f"https://pixelplace.io/{self.chart}")
         while self.authid == None and self.authtoken == None and self.authkey == None:
             try:
                 self.auth_data()
@@ -215,19 +218,20 @@ class SusBot():
         self.load_map_into_cache(self.chart)
         
         # define a bunch of variables:
-        self.function_name = 'Sus Bot'
-        self.lastx, self.lasty = random.randint(-total, total), random.randint(-total, total)
-        self.x, self.y = random.randint(-total, total), random.randint(-total, total)
+        self.function_name = 'SusBot: Evolution'
+        self.lastx, self.lasty = random.randint(0, total), random.randint(0, total)
+        self.x, self.y = random.randint(0, total), random.randint(0, total)
         self.cx, self.cy = 0, 0
         self.semaphores = {}
-        self.speed = speed      
         self.work_order ={}
         self.color = 5
         self.coordinates = ()
         self.start_time = time.time()
+        self.sorted_color_weights = {}
         self.current_pattern_index = 0
         self.logos = True
-        self.flag = True
+        self.reverse_gradient = True
+        self.flag = True #use for hotkey handler
         self.colorfilter = set()
         
         # colorweights init and random items:   
@@ -276,8 +280,8 @@ class SusBot():
                                    " ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ ͜ʖ"]
         self.mighty_wind_labels2 = ["\n   +Pawn+", f"\n   Knight ꞀL"]
         self.mighty_wind_labels_flag = False
-        self.fill_patterns = [((0, 1),(0, -1),(1, 0),(-1,0)),
-        ((2, 1),(2, -1),(-2, 1),(-2, -1),(1, 2),(1, -2),(-1, 2),(-1,-2))]
+        self.fill_patterns = [((0, 1),(-1, 0),(0, -1),(1,0)),
+        ((2, 1),(1, 2),(-2, 1),(-1, 2),(-2, -1),(-1, -2),(2, -1),(1,-2))]
             
         # get queue ready
         self.queue = queue.LifoQueue()
@@ -300,24 +304,39 @@ class SusBot():
         # start gui
         self.update_window_pos()
         self.root.mainloop()
+                
+    def connection(self, chart): #maintain socket connection and update pixel cache
+        sio.connect('https://pixelplace.io', transports=['websocket'])        
+        @sio.event
+        def connect():
+            self.chart = chart
+            sio.emit("init",{"authKey":f"{self.authkey}","authToken":f"{self.authtoken}","authId":f"{self.authid}","boardId":self.chart})
+            threading.Timer(15, connect).start()
             
-    # keybindings:
-    
+        @sio.on("p")
+        def update_pixels(p: tuple):
+            for i in p:
+                if self.cache[i[0], i[1]] not in null:
+                    self.cache[i[0], i[1]] = colors_reverse[i[2]]
+
+    # keybindings:    
     def hotkey_preload(self):
-        self.swap_colors_keys = 'shift+A'
-        self.magic_wand_key = 'shift+W'
-        self.amogus_key = 'shift+E'
+        self.swap_colors_keys = 'shift+]'
+        self.amogus_key = 'shift+e'
         self.toggle_logos_key = '='
         self.linekey = 'shift+X'
-        self.circle_fill_key = 'shift+R'
-        self.river_bend_key = 'shift+C'
+        self.circle_fill_key = 'shift+r'
+        self.river_bend_key = 'shift+j'
         self.copykey = 'f8'
         self.pastekey = 'f9'
-        self.windkey = 'shift+V'
-        self.toggle_pattern_key = 'shift+T'
+        self.fill_bucket_key = 'shift+q'
+        self.gradientkey = 'shift+v'
+        self.magic_wand_key = 'shift+W'
+        self.toggle_pattern_key = 'f4'
+        self.toggle_gradient_key = 'f2'
         self.downspeed = 'shift+insert'
         self.upspeed = 'shift+del'
-        self.fillborderskey = 'shift+S'
+        self.fillborderskey = 'shift+s'
         self.sample_colors_key='`'
         
         # key descriptions:        
@@ -330,15 +349,18 @@ class SusBot():
             f'  {self.sample_colors_key}  hold/drag/release: areas colors',
             f'  tap {self.sample_colors_key} to reposition the color menu',
             '',
-            f'  Left click to double color',
-            f'  Right click to divide color',
-            f'  Scroll wheel to finetune color',
-            f'  Middle mouse click to remove color',
+            f'  Left click color to double weight',
+            f'  Right click color to divide weight',
+            f'  Scroll wheel over color to finetune weight',
+            f'  Middle mouse color to delete it',
             f'  Shift + ~ (shift+Tilde) to divide all',
             f'  Hold shift + ~ (shift+Tilde) to clear all',
             f'  Press 0 to switch all zeros and ones',
             '',   
-            f'  {self.windkey}   bucket tool',
+            f'  {self.fill_bucket_key}   bucket tool',
+            f'  {self.gradientkey}   gradient bucket tool',
+            f'  {self.toggle_gradient_key}   switch gradient direction',
+            f'  {self.magic_wand_key}   neural brush',
             f'  {self.toggle_pattern_key}   switch stance',
             '',
             f'  {self.circle_fill_key}   hold/drag/release: circle tool',
@@ -348,7 +370,6 @@ class SusBot():
             '',
             f'  {self.copykey}   hold/drag/release: copy area',
             f'  {self.pastekey}   paste',
-            f'  {self.magic_wand_key}   (buggy) "Magic Wand" tool',
             '',
             f'  {self.upspeed}   increase speed',
             f'  {self.downspeed}   decrease speed',
@@ -389,19 +410,21 @@ class SusBot():
                 
     # bind hotkeys to functions            
     def hotkeys(self):
-        keyboard.add_hotkey(self.swap_colors_keys,lambda: Thread(target=partial(self.hotkey_handler, self.swap_colors_keys, 'swap_colors', 2)).start())
-        keyboard.add_hotkey(self.magic_wand_key,lambda: Thread(target=partial(self.hotkey_handler, self.magic_wand_key, 'magic_wand', 3)).start())
+        keyboard.add_hotkey(self.magic_wand_key,lambda: Thread(target=partial(self.hotkey_handler, self.magic_wand_key, 'magic_wand', 1)).start())
+        keyboard.add_hotkey(self.swap_colors_keys,lambda: Thread(target=partial(self.hotkey_handler, self.swap_colors_keys, 'swap_colors')).start())
         keyboard.add_hotkey(self.amogus_key, lambda: Thread(target=partial(self.hotkey_handler, self.amogus_key, 'amogus')).start())        
         keyboard.add_hotkey(self.toggle_pattern_key,lambda:  Thread(target=partial(self.hotkey_handler, self.toggle_pattern_key, 'toggle_pattern')).start())
+        keyboard.add_hotkey(self.toggle_gradient_key,lambda:  Thread(target=partial(self.hotkey_handler, self.toggle_gradient_key, 'toggle_gradient')).start())
         keyboard.add_hotkey(self.toggle_logos_key,lambda:Thread(target=partial(self.hotkey_handler, self.toggle_logos_key, 'toggle_logos')).start())
         keyboard.add_hotkey(self.linekey,lambda:Thread(target=partial(self.hotkey_handler, self.linekey, "thick_line")).start())
         keyboard.add_hotkey(self.circle_fill_key, lambda: Thread(target=partial(self.hotkey_handler, self.circle_fill_key, 'circle_fill')).start())
-        keyboard.add_hotkey(self.copykey,lambda:  Thread(target=partial(self.hotkey_handler, self.copykey, 'copypaste', 1)).start())
-        keyboard.add_hotkey(self.pastekey,lambda:  Thread(target=partial(self.hotkey_handler, self.pastekey, 'copypaste', 1)).start())
-        keyboard.add_hotkey(self.windkey,lambda: Thread(target=partial(self.hotkey_handler, self.windkey, 'mighty_wind')).start())                            
-        keyboard.add_hotkey(self.fillborderskey,lambda:Thread(target=partial(self.hotkey_handler, self.fillborderskey, 'border_helper')).start())                            
-        keyboard.add_hotkey(self.sample_colors_key,lambda:Thread(target=partial(self.hotkey_handler, self.sample_colors_key, 'sample_colors', 2)).start())                          
-        keyboard.add_hotkey(self.river_bend_key, lambda: Thread(target=partial(self.hotkey_handler, self.river_bend_key, 'river_bend', 1)).start()) 
+        keyboard.add_hotkey(self.copykey,lambda:  self.copypaste(self.copykey))
+        keyboard.add_hotkey(self.pastekey,lambda:  self.copypaste(self.pastekey))
+        keyboard.add_hotkey(self.fill_bucket_key,lambda: Thread(target=partial(self.hotkey_handler, self.fill_bucket_key, 'mighty_wind',1)).start())   
+        keyboard.add_hotkey(self.gradientkey,lambda: Thread(target=partial(self.hotkey_handler, self.gradientkey, 'gradient_fill',1)).start())                            
+        keyboard.add_hotkey(self.fillborderskey,lambda:Thread(target=partial(self.hotkey_handler, self.fillborderskey, 'border_tool')).start())                            
+        keyboard.add_hotkey(self.sample_colors_key,lambda:Thread(target=partial(self.hotkey_handler, self.sample_colors_key, 'sample_colors')).start())                          
+        keyboard.add_hotkey(self.river_bend_key, lambda: Thread(target=partial(self.hotkey_handler, self.river_bend_key, 'river_bend',1)).start()) 
         keyboard.add_hotkey(self.downspeed, lambda: self.change_speed(self.downspeed))
         keyboard.add_hotkey(self.upspeed, lambda: self.change_speed(self.upspeed))
         for i in range(1, 10):
@@ -410,24 +433,321 @@ class SusBot():
         keyboard.add_hotkey('shift+~', lambda: Thread(target=self.adjust_weights('half')).start())
         keyboard.add_hotkey('0', lambda: Thread(target=self.flip_colorweights()).start())
         for letter in 'abcdefghijklmnopqrstuvwxyz':
-            keyboard.add_hotkey(letter, lambda letter=letter: Thread(target=partial(self.hotkey_handler, letter, 'draw_character')).start())
-       
-    def draw_character(self, key):
+            keyboard.add_hotkey(letter, lambda letter=letter: Thread(target=partial(self.hotkey_handler, letter, 'draw_character_v2', 1)).start())
+
+    def scale_character(self, key, zone_width, zone_height):
+        # Get the points for the character in its default size
+        default_points = letters.get(key, ())
+        
+        # Calculate the default width and height of the character
+        default_width = max(x for x, y in default_points) - min(x for x, y in default_points) if default_points else 0
+        default_height = max(y for x, y in default_points) - min(y for x, y in default_points) if default_points else 0
+        
+        # If character is 1D (like 'i'), set default_width to a non-zero value
+        if default_width == 0:
+            default_width = 1
+
+        # If character is 1D (like '-'), set default_height to a non-zero value
+        if default_height == 0:
+            default_height = 1
+
+        # Calculate the scaling factors
+        width_scale = round(zone_width / default_width)
+        height_scale = round(zone_height / default_height)
+        
+        # Scale the points and adjust them to be relative to the center of the character
+        scaled_points = set()
+        for x, y in default_points:
+            for i in range(width_scale):
+                for j in range(height_scale):
+                    scaled_points.add((round((x - default_width / 2) * width_scale + i), round((y - default_height / 2) * height_scale + j)))
+        
+        return list(scaled_points)
+
+    def draw_character_v2(self, key, scale_factor=1):
+        self.start = time.perf_counter()
+        try:              
+            if not keyboard.is_pressed('shift'):
+                start, end = self.zone(key)
+                zone_width = abs(end[0] - start[0])
+                zone_height = abs(end[1] - start[1])
+                letter = self.scale_character(key, zone_width, zone_height)
+                for i in range(len(letter) - 1):
+                    p1 = letter[i]
+                    p2 = letter[i + 1]
+                    points = self.interpolate_points(p1, p2)
+                    for point in points:
+                        # Scale the point to a larger square
+                        for i in range(scale_factor):
+                            try:
+                                light_color, dark_color = self.get_darkest_lightest_rgb()
+                            except:
+                                light_color, dark_color = self.color, self.color  
+                            for j in range(scale_factor):
+                                self.emitsleep(point[0] + i, point[1] + j, dark_color, timer=True)
+                for a, b in letter:
+                    for i in range(scale_factor):
+                        try:
+                            light_color, dark_color = self.get_darkest_lightest_rgb()
+                        except:
+                            light_color, dark_color = self.color, self.color  
+                        for j in range(scale_factor):
+                            self.emitsleep(int(end[0] + a) + i, int(end[1] + b) + j, dark_color, priority=True, timer=True)   
+                time.sleep(self.speed*3)
+                for c, d in letter:
+                    for i in range(scale_factor):
+                        try:
+                            light_color, dark_color = self.get_darkest_lightest_rgb()
+                        except:
+                            light_color, dark_color = self.color, self.color  
+                        for j in range(scale_factor):
+                            self.emitsleep(int(end[0] + c) + i, int(end[1] + d + 1) + j, light_color, priority=True, timer=True)
+        except Exception as e:
+            print(e)
+
+    def emitsleep(self, x, y, color=None, priority=False, timer=None, timing_system=True):
+        self.queue.put((x, y, color))
+        try:
+            with lock:
+                x, y, color = self.queue.get(block=False)
+                if x >= 0 and x <= self.width - 1 and y >= 0 and y <= self.height - 1:
+                    curcol = self.cache[x,y]
+                    if curcol not in null:
+                        if color == None:
+                            color = self.random_weighted_color()
+                        if self.colorweights[curcol] > self.colorweights[colors_reverse[color]] and not priority:
+                            return False
+                        if priority and curcol in self.colorfilter:
+                            return False
+                        if keyboard.is_pressed(stop_key):
+                            self.queue = queue.LifoQueue()
+                            return False
+                        sio.emit('p',[x, y, color, 1])
+                        self.color = color
+                        if timing_system:
+                            time.sleep(self.speed - (self.start - time.perf_counter()))
+                            self.start = time.perf_counter()
+                        return True
+            return False
+        except:
+            return False
+
+    def brightness(self, color_weight):
+        color, weight = color_weight
+        return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]
+
+
+    def gradient_fill(self, key):
         self.start = time.perf_counter()
         try:
-            try:
-                c1, c2 = self.get_darkest_lightest_rgb()
-            except:
-                c1, c2 = self.color, self.color                
-            if not keyboard.is_pressed('shift'):
-                X, Y = self.xy()
-                letter = letters.get(key, ())
-                for x, y in letter:
-                    self.emitsleep(X + x, Y + y, c2, priority=True, timer=True)
-                for x, y in letter:
-                    self.emitsleep(X + x, Y + y + 1, c1, priority=True, timer=True)
+            x, y = self.xy()
+            locs = set()
+            curcol = self.cache[x, y]
+            if curcol not in null:
+                color_value = colors[curcol]
+                color_weight = self.colorweights[curcol]
+                self.colorweights[curcol] = 0
+
+                locs.add(self.xy())
+                self.update_colorfilter()
+                
+                color_weights = {color: weight for color, weight in self.colorweights.items() if color in self.colorfilter}
+                self.sorted_color_weights = sorted(color_weights.items(), key=self.brightness)
+
+                cumulative_weights = []
+                total_weight = sum(weight for color, weight in self.sorted_color_weights)
+                acc = 0
+                for color, weight in self.sorted_color_weights:
+                    acc += weight
+                    cumulative_weights.append(acc / total_weight)
+
+                y_values = [coord[1] for coord in locs]
+                y_min, y_max = min(y_values), max(y_values)
+                y_range = max(y_max - y_min, 1)  # avoid division by zero
+
+                while len(locs) > 0:
+                    if keyboard.is_pressed(stop_key):
+                        return
+                    if keyboard.is_pressed(key):
+                        locs.add(self.xy())
+                    y_min = min(y for x, y in locs)
+                    y_max = max(y for x, y in locs)
+                    y_range = y_max - y_min
+                    x, y = locs.pop()
+                    color_to_use = self.choose_color(y, self.reverse_gradient, y_min, y_max, y_range)
+                    if self.emitsleep(x, y, color_to_use, priority=True, timer=True):
+                        for a in self.fill_patterns[self.current_pattern_index]:
+                            coord = (a[0] + x, a[1] + y)
+                            locs.add((coord))
         except:
             pass
+
+    def choose_color(self, y, reverse, y_min, y_max, y_range):
+        sorted_colors = self.sorted_color_weights[::-1] if reverse else self.sorted_color_weights
+
+        if len(sorted_colors) == 1:
+            return colors[sorted_colors[0][0]]
+        elif len(sorted_colors) == 2:
+            weight_color_1 = sorted_colors[0][1]
+            weight_color_2 = sorted_colors[1][1]
+            middle_y = (y_min * weight_color_2 + y_max * weight_color_1) / (weight_color_1 + weight_color_2)
+            return colors[sorted_colors[0][0]] if y <= middle_y else colors[sorted_colors[1][0]]
+        else:
+            cumulative_weights = []
+            total_weight = sum(weight for color, weight in sorted_colors)
+            acc = 0
+            for color, weight in sorted_colors:
+                acc += weight
+                cumulative_weights.append(acc / total_weight)
+
+            section_centers = [(cumulative_weights[i-1] + cumulative_weights[i]) / 2 * y_range + y_min 
+                            for i in range(1, len(cumulative_weights))]
+            section_centers.insert(0, y_min)
+            section_centers.append(y_max)
+
+            epsilon = 1e-5  # small constant to avoid division by zero
+            probabilities = []
+            for i in range(len(section_centers)-1):
+                if i == 0 or i == len(section_centers)-2:  # Edge colors
+                    scale = max((section_centers[i+2]-section_centers[i])/2, epsilon) if i == 0 else max((section_centers[i]-section_centers[i-2])/2, epsilon)
+                else:  # Middle colors
+                    scale = max((section_centers[i+1]-section_centers[i-1])/2, epsilon)
+                probabilities.append(norm.pdf(y, loc=section_centers[i], scale=scale))
+
+            # Calculate the last probability to complete the list
+            last_probability = 1 - sum(probabilities)
+            probabilities.append(last_probability)
+
+            probabilities = [p * weight for p, weight in zip(probabilities, [cw[1] for cw in sorted_colors])]
+            probabilities = [p / sum(probabilities) for p in probabilities]
+
+            color = random.choices(sorted_colors, weights=probabilities, k=1)[0][0]
+            return colors[color]
+
+    # fill bucket tool
+    def mighty_wind(self, key):
+        self.start = time.perf_counter()
+        try:
+            x, y = self.xy()
+            locs = set()                 
+            curcol = self.cache[x, y]
+            if curcol not in null:
+                color_value = colors[curcol]
+                color_weight = self.colorweights[curcol]
+                self.colorweights[curcol] = 0            
+                def locate():
+                    x, y = self.xy()
+                    locs.add((x, y))
+                locate()
+                self.update_colorfilter()
+                while len(locs) > 0:
+                    if keyboard.is_pressed(stop_key):
+                        return
+                    if keyboard.is_pressed(key):
+                        locate()                    
+                    x, y = locs.pop()
+                    if self.emitsleep(x, y, priority=True, timer=True):
+                        for a in self.fill_patterns[self.current_pattern_index]:
+                            coord = (a[0]+ x, a[1] + y)
+                            locs.add((coord))
+        except:
+            pass
+        
+    def magic_wand(self, key):
+        self.start = time.perf_counter()
+        try:
+            self.x, self.y = self.xy()
+            locs = set([(self.x, self.y)])
+            while True:
+                if self.cache[self.x, self.y] not in null:
+                    self.x, self.y = locs.pop()
+                    curcol = self.cache[self.x, self.y]
+                    self.colorweights[curcol] = 0
+                    locs.add((self.x, self.y))
+                while locs:
+                    self.reduce_weights()
+                    self.update_colorfilter()
+                    if keyboard.is_pressed(stop_key):
+                        return
+                    self.x, self.y = locs.pop()
+                    sleep = self.emitsleep(self.x, self.y, priority = True if self.current_pattern_index == 0 else False, timer = True)            
+                    for a in self.fill_patterns[0]:
+                        for b in self.fill_patterns[1]:
+                            coord = (a[0] * b[0] + self.x, a[1] * b[1] + self.y)
+                            if coord[0] >= 0 and coord[0] <= self.width - 1 and coord[1] >= 0 and coord[1] <= self.height - 1:
+                                if sleep:
+                                    locs.add(coord)
+                                    if self.cache[coord[0], coord[1]] not in null + [curcol]:
+                                        new_value = self.colorweights[self.cache[coord[0], coord[1]]] + (a[0] * b[0] + a[1] * b[1])
+                                        if new_value > 0:
+                                            self.colorweights[self.cache[coord[0], coord[1]]] = new_value
+                                            self.decay_large_weights()
+                                else:
+                                    if self.cache[coord[0], coord[1]] not in null + [curcol]:
+                                        new_value = self.colorweights[self.cache[coord[0], coord[1]]] - (a[0] * b[0] + a[1] * b[1])
+                                        if new_value > 0:
+                                            self.colorweights[self.cache[coord[0], coord[1]]] = new_value
+                                            self.decay_weights() 
+                while not locs:
+                    for a in set(self.fill_patterns[0]):
+                        for b in set(self.fill_patterns[1]):
+                            nextcolor = a[0]*b[0]+self.x, a[1]*b[1]+self.y
+                            if (0 <= nextcolor[0] < self.width and 0 <= nextcolor[1] < self.height and 
+                                self.cache[nextcolor] not in null):
+                                locs.add(nextcolor)
+        except:
+            pass
+    
+    def interpolate_points(self, p1, p2):
+        x1, y1 = p1
+        x2, y2 = p2
+        points = []
+
+        if x1 != x2:
+            slope = (y2 - y1) / (x2 - x1)
+            for x in range(x1, x2 + 1):
+                y = y1 + slope * (x - x1)
+                points.append((x, int(y)))
+        else:
+            if y1 != y2:
+                for y in range(y1, y2 + 1):
+                    points.append((x1, y))
+
+        return points
+
+    def draw_character(self, key):
+        self.start = time.perf_counter()
+        try:               
+            if not keyboard.is_pressed('shift'):
+                start, end = self.zone(key)
+                zone_width = abs(end[0] - start[0])
+                zone_height = abs(end[1] - start[1])
+                letter = self.scale_character(key, zone_width, zone_height)
+                for i in range(len(letter) - 1):
+                    p1 = letter[i]
+                    p2 = letter[i + 1]
+                    points = self.interpolate_points(p1, p2)
+                    for point in points:
+                        try:
+                            light_color, dark_color = self.get_darkest_lightest_rgb()
+                        except:
+                            light_color, dark_color = self.color, self.color 
+                        self.emitsleep(point[0], point[1], dark_color, timer=True)
+                for a, b in letter:
+                    try:
+                        light_color, dark_color = self.get_darkest_lightest_rgb()
+                    except:
+                        light_color, dark_color = self.color, self.color 
+                    self.emitsleep(int(end[0] + a), int(end[1] + b), dark_color, priority=True, timer=True)   
+                time.sleep(speed*3)
+                for c, d in letter:
+                    try:
+                        light_color, dark_color = self.get_darkest_lightest_rgb()
+                    except:
+                        light_color, dark_color = self.color, self.color 
+                    self.emitsleep(int(end[0] + c), int(end[1] + d + 1), light_color, priority=True, timer=True)
+        except Exception as e:
+            print(e)
         
     def flip_colorweights(self):
         flipped_colorweights = {}
@@ -448,7 +768,7 @@ class SusBot():
             pass
         
     # amogus
-    def amogus(self, key): #add shift modifier
+    def amogus(self, key):
         self.start = time.perf_counter()
         try:
             # Get the mouse coordinates
@@ -515,16 +835,13 @@ class SusBot():
             # save the location data to memory for the next one to access
             self.lastx, self.lasty = X, Y
         except:
-            pass        
+            pass
 
     # get the lightest and darkest values from a list of rgb colors    
     def get_darkest_lightest_rgb(self):
         if len(self.colorfilter) >= 2:
-            def brightness(color_weight):
-                color, weight = color_weight
-                return 0.2126 * color[0] + 0.7152 * color[1] + 0.0722 * color[2]
             color_weights = {color: weight for color, weight in self.colorweights.items() if color in self.colorfilter}
-            sorted_color_weights = sorted(color_weights.items(), key=brightness)
+            sorted_color_weights = sorted(color_weights.items(), key=self.brightness)
             n = len(sorted_color_weights)
             light_colors = sorted_color_weights[:n//2]
             dark_colors = sorted_color_weights[n//2:]
@@ -611,9 +928,8 @@ class SusBot():
                             return
         except:
             pass
-        
-    # border maker tool    
-    def border_helper(self, key):
+           
+    def border_tool(self, key):
         self.start = time.perf_counter()
         try:
             start, end = self.zone(key)            
@@ -632,7 +948,7 @@ class SusBot():
             pass
 
     # line tool, change the width in the parameter width=4 below to your preference int
-    def thick_line(self, key, width=2):
+    def thick_line(self, key, width=1):
         self.start = time.perf_counter()
         try:
             set1 = set()
@@ -659,11 +975,11 @@ class SusBot():
                     set1.add((x3 + j, y3))
                     set1.add((x3, y3 + j))
             for c in set1:
-                self.emitsleep(c[0],c[1], timer=True)
+                self.emitsleep(c[0],c[1], priority=True, timer=True)
         except:
             pass
         
-    # change the fill bucket pattern between Pawn or Knight
+    # change the fill bucket pattern between Pawn or Knight (fill spread)
     def toggle_pattern(self, key):
         self.current_pattern_index = (self.current_pattern_index + 1) % len(self.fill_patterns)
         self.current_fill_pattern = self.fill_patterns[self.current_pattern_index]
@@ -671,12 +987,15 @@ class SusBot():
             print(f'\n With their trusty {self.random_item_name1} by their side,\n    The legendary figure, known as the:\n')
             print("       ",self.mighty_wind_labels[self.current_pattern_index])
             print(f'\n    . . . embarks upon the land . . .\n')
-            print(f'  - {self.windkey} to pour bucket.\n')
-            print(f'  - {self.magic_wand_key} to use {self.random_item_name1}.\n')
+            print(f'  - {self.fill_bucket_key} to pour bucket.\n')
             print(f'  - {self.toggle_pattern_key} to switch stance.\n')
             print(f'  - {self.swap_colors_keys} to invert colors.\n')
             self.mighty_wind_labels_flag = True
         time.sleep(speed * 3)
+
+    def toggle_gradient(self, key):
+        self.reverse_gradient = not self.reverse_gradient
+        time.sleep(speed*3)
         
     def random_weighted_color(self):
         color_weights = self.colorweights
@@ -696,7 +1015,6 @@ class SusBot():
         color_to_rgb = dict(zip(labels, colors.keys()))
         return color_to_rgb[color_name]
    
-    # update the gui labels
     def update_labels(self):
         try:
             for widget in self.label_frame.winfo_children():
@@ -763,7 +1081,6 @@ class SusBot():
             color = colors_reverse[self.return_color()]            
             self.colorweights[color] = max(0, self.colorweights[color] + char)
 
-    # helper methods for clearing colorweights    
     def clear_colorweights(self, char):
         if char == 'clear':
             for color in self.colorweights:
@@ -775,7 +1092,7 @@ class SusBot():
     def set_colorweight_to_zero(self, color):        
         self.colorweights[color] = 0
         
-    # grab the sums for every color in swiped the area        
+    # grab the sums for every color in swiped area        
     def sample_colors(self, key = None, x1=None, y1=None, x2=None, y2=None):
         self.update_window_pos()
         self.reduce_weights()
@@ -814,107 +1131,24 @@ class SusBot():
                 return True
             return False
         
-    def emitsleep(self, x, y, color = None, priority=False, timer = None):
-        self.queue.put((x, y, color))
-        try:
-            with lock:
-                x, y, color = self.queue.get(block=False)
-                if x >= 0 and x <= self.width - 1 and y >= 0 and y <= self.height - 1:
-                    curcol = self.cache[x,y]
-                    if curcol not in null:
-                        if color == None:
-                            color = self.random_weighted_color()
-                        if self.colorweights[curcol] > self.colorweights[colors_reverse[color]] and not priority:
-                            return False
-                        if priority and curcol in self.colorfilter:
-                            return False
-                        if keyboard.is_pressed(stop_key):
-                            self.queue = queue.LifoQueue()
-                            return False
-                        sio.emit('p',[x, y, color, 1])
-                        self.color = color
-                        time.sleep(self.speed - (self.start - time.perf_counter()))
-                        self.start = time.perf_counter()
-                        return True
-            return False
-        except:
-            return False
-                
-    def magic_wand(self, key):
-        self.start = time.perf_counter()
-        try:
-            self.x, self.y = self.xy()
-            locs = set([(self.x, self.y)])
-            while True:
-                if self.cache[self.x, self.y] not in null:
-                    self.x, self.y = locs.pop()
-                    curcol = self.cache[self.x, self.y]
-                    self.colorweights[curcol] = 0
-                    locs.add((self.x, self.y))
-                while locs:
-                    self.reduce_weights()
-                    self.update_colorfilter()
-                    if keyboard.is_pressed(stop_key):
-                        return
-                    if keyboard.is_pressed(key):
-                        locs.add((self.x, self.y))
-                    self.x, self.y = locs.pop()
-                    sleep = self.emitsleep(self.x, self.y, priority = True if self.current_pattern_index == 0 else False, timer = True)            
-                    for a in self.fill_patterns[0]:
-                        for b in self.fill_patterns[1]:
-                            coord = (a[0] * b[0] + self.x, a[1] * b[1] + self.y)
-                            if coord[0] >= 0 and coord[0] <= self.width - 1 and coord[1] >= 0 and coord[1] <= self.height - 1:
-                                if sleep:
-                                    locs.add(coord)
-                                    if self.cache[coord[0], coord[1]] not in null + [curcol]:
-                                        new_value = self.colorweights[self.cache[coord[0], coord[1]]] + (a[0] * b[0] + a[1] * b[1])
-                                        if new_value > 0:
-                                            self.colorweights[self.cache[coord[0], coord[1]]] = new_value
-                                else:
-                                    if self.cache[coord[0], coord[1]] not in null + [curcol]:
-                                        new_value = self.colorweights[self.cache[coord[0], coord[1]]] - (a[0] * b[0] + a[1] * b[1])
-                                        if new_value > 0:
-                                            self.colorweights[self.cache[coord[0], coord[1]]] = new_value
-                while not locs:
-                     for a in self.fill_patterns[0]:
-                        for b in self.fill_patterns[1]:
-                            nextcolor = a[0]*b[0]+self.x, a[1]*b[1]+self.y
-                            sorted_weights = sorted(self.colorweights.values())
-                            if self.cache[nextcolor] not in null and self.colorweights[self.cache[nextcolor]] in range(0, sorted_weights[-1]):
-                                locs.add((nextcolor))
-        except:
-            pass
+    def decay_large_weights(self):
+        total_weight = sum(self.colorweights.values())
+        decay_factor = 0.001  # adjust this value to control the speed of decay
 
-    # fill bucket tool
-    def mighty_wind(self, key):
-        self.start = time.perf_counter()
-        try:
-            x, y = self.xy()
-            locs = set()                 
-            curcol = self.cache[x, y]
-            if curcol not in null:
-                color_value = colors[curcol]
-                color_weight = self.colorweights[curcol]
-                self.colorweights[curcol] = 0            
-                def locate():
-                    x, y = self.xy()
-                    locs.add((x, y))
-                locate()
-                self.update_colorfilter()
-                while len(locs) > 0:
-                    if keyboard.is_pressed(stop_key):
-                        return
-                    if keyboard.is_pressed(key):
-                        locate()                    
-                    x, y = locs.pop()
-                    if self.emitsleep(x, y, priority=True, timer=True):
-                        for a in self.fill_patterns[self.current_pattern_index]:
-                            coord = (a[0]+ x, a[1] + y)
-                            locs.add((coord))
-        except:
-            pass
-        
-    # helper methods for updating colorweights
+        max_weight_color = max(self.colorweights, key=self.colorweights.get)
+        max_weight = self.colorweights[max_weight_color]
+
+        if max_weight > 1:
+            self.colorweights[max_weight_color] -= decay_factor * total_weight
+
+    def decay_weights(self):
+        total_weight = sum(self.colorweights.values())
+        decay_factor = 0.001 # adjust this value to control the speed of decay
+
+        for color, weight in self.colorweights.items():
+            if 0 < weight <= 1:
+                self.colorweights[color] -= decay_factor * total_weight
+     
     def update_colorfilter(self):
         self.colorweights = {color: weight if weight == -1 else max(0, weight) for color, weight in self.colorweights.items()}
         self.colorfilter = set(color for color, weight in self.colorweights.items() if weight > 0 or weight == -1)    
@@ -930,8 +1164,7 @@ class SusBot():
         for color, weight in self.colorweights.items():
             if weight == min_weight:
                 return color
-
-    # helper methods for detecting rgb brightness values        
+      
     def rgb_to_brightness(self, rgb):
         return int(0.299*rgb[0] + 0.587*rgb[1] + 0.114*rgb[2])
 
@@ -1049,8 +1282,7 @@ class SusBot():
         if next_color_int not in colors.values():
             next_color_int = next(i % len(colors) for i in range(next_color_int+direction, next_color_int+len(colors)*direction, direction) if i % len(colors) in colors.values())
         return next_color_int
-
-    # map cache loader          
+        
     def load_map_into_cache(self, chart):
         with open(f'{self.chart}.png', 'wb') as f:
             f.write(requests.get(f'https://pixelplace.io/canvas/{chart}.png?t={random.randint(9999,99999)}').content)
@@ -1061,8 +1293,7 @@ class SusBot():
         self.image.save(f'{self.chart}.png')
         self.cache = self.image.load()
         print(f' Successfully loaded chart: {self.chart}')
-
-    # auto-login helpers    
+   
     def visibility_state(self):
         try:
             vis = driver.execute_script("return document.visibilityState") == "visible"
@@ -1075,47 +1306,14 @@ class SusBot():
             for w in chwd:
                 if(w!=p):
                     driver.switch_to.window(w)
-                    
-    def clear_cookies(self, url):
-        driver.get(url)
-        driver.delete_all_cookies()
-        
-    def login(self):
-        try:
-            driver.get("https://pixelplace.io/api/sso.php?type=2&action=login")
-            driver.find_element(By.ID,'loginUsername').send_keys(crewmate.username)
-            driver.find_element(By.ID,'loginPassword').send_keys(crewmate.password)
-            driver.find_elements(By.XPATH,'/html/body/div/main/div[1]/div/div[2]/form/fieldset')[4].click()
-            WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH,'/html/body/div[3]/div/div[2]/form/div/input'))).click()
-            WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH,'/html/body/div[5]/div[2]/a/img'))).click()
-            WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH,'/html/body/div[3]/div[8]/a[2]/div[3]/button[2]'))).click()
-            print('Logged in.')
-        except:
-            pass
       
     def auth_data(self):
         self.authkey = driver.get_cookie("authKey").get('value')
+        print('  -Got Key -')
         self.authtoken = driver.get_cookie("authToken").get('value')
+        print('    -Got Token -')
         self.authid = driver.get_cookie("authId").get('value')
-        
-    def connection(self, chart):
-        sio.connect('https://pixelplace.io', transports=['websocket'])        
-        @sio.event        
-        def connect():
-            self.chart = chart
-            sio.emit("init",{"authKey":f"{self.authkey}","authToken":f"{self.authtoken}","authId":f"{self.authid}","boardId":self.chart})
-            threading.Timer(15, connect).start()
-        @sio.on("p")        
-        def update_pixels(p: tuple): 
-            for i in p:
-                try:
-                    if self.cache[i[0], i[1]] not in null:
-                        self.cache[i[0], i[1]] = colors_reverse[i[2]]                        
-                except:
-                    pass
+        print('     - Got ID -')
                 
     # toggle guild war logos on or off with the toggle_logos_key you set earlier, by default the equals -> = <- sign        
     def toggle_logos(self, key):
@@ -1135,28 +1333,29 @@ class SusBot():
                 except:
                     pass
             self.logos = True
-        time.sleep(speed * 3)
+        time.sleep(speed * 3)        
         
     # speed control helper    
     def change_speed(self, key):
+        increment = 0.000001
         if key == self.downspeed:
-            self.speed  += 0.00001
+            self.speed  += increment
             self.speed  = float('%.7f'%self.speed)
         elif key == self.upspeed:
-            self.speed  -= 0.00001
+            self.speed  -= increment
             self.speed  = float('%.7f'%self.speed)
         if self.speed < 0.013:
             print(f"Going too fast now, defaulting to {0.016} to prevent perma ban.")
-            self.speed = 0.016
-        if self.speed <= 0.013999:
+            self.speed = regular_speed
+        if self.speed <= 0.01421:
             print(f"Warning: You are in speed throttling territory.")
         print("Speed:", self.speed)
         
 letters= {
-            'a': {(-1, -1),(0, -1),(1, -1), 
-                (-1, 0),        (1, 0),
-                (-1, 1), (0, 1),(1, 1),
-                (-1, 2), (1, 2),     },
+            'a': {(-1,-1),(0, -1),(1, -1), 
+                 (-1, 0),         (1, 0),
+                 (-1, 1), (0, 1), (1, 1),
+                 (-1, 2),         (1, 2),},
             
             'b': {(-1,-2),(0,-2), 
                   (-1,-1),      (1,-1),
@@ -1286,8 +1485,10 @@ letters= {
                   (0, 1),
                   (0, 2), (1, 2), },
         }
+letters = {k: sorted(v) for k, v in letters.items()}
 
 if __name__ == '__main__':
     # create 'SusBot' instance
     susbot = SusBot()
-#END OF THE LINE, PARTNER
+
+# End of the line, partner.
