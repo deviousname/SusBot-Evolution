@@ -6,6 +6,7 @@ import json
 import keyboard
 import socketio # requires: python-socketio[client]==4.6.1
 import random
+from random import shuffle, randrange
 import time
 import urllib.request
 import PIL
@@ -338,6 +339,7 @@ class SusBot():
         self.upspeed = 'shift+del'
         self.fillborderskey = 'shift+s'
         self.sample_colors_key='`'
+        self.maze_key='shift+n'
         
         # key descriptions:        
         controls = ['',
@@ -368,6 +370,7 @@ class SusBot():
             f'  {self.linekey}   hold/drag/release: line tool',
             f'  {self.river_bend_key}   hold/drag/release: curve tool',
             f'  {self.fillborderskey}   hold/drag/release: border tool',
+            f'  {self.maze_key}   hold/drag/release: maze tool',
             '',
             f'  {self.copykey}   hold/drag/release: copy area',
             f'  {self.pastekey}   paste',
@@ -411,6 +414,7 @@ class SusBot():
                 
     # bind hotkeys to functions            
     def hotkeys(self):
+        keyboard.add_hotkey(self.maze_key,lambda: Thread(target=partial(self.hotkey_handler, self.maze_key, 'make_maze')).start()) 
         keyboard.add_hotkey(self.magic_wand_key,lambda: Thread(target=partial(self.hotkey_handler, self.magic_wand_key, 'magic_wand', 1)).start())
         keyboard.add_hotkey(self.swap_colors_keys,lambda: Thread(target=partial(self.hotkey_handler, self.swap_colors_keys, 'swap_colors')).start())
         keyboard.add_hotkey(self.amogus_key, lambda: Thread(target=partial(self.hotkey_handler, self.amogus_key, 'amogus')).start())        
@@ -436,6 +440,76 @@ class SusBot():
         for letter in 'abcdefghijklmnopqrstuvwxyz':
             keyboard.add_hotkey(letter, lambda letter=letter: Thread(target=partial(self.hotkey_handler, letter, 'draw_character_v2', 1)).start())
 
+    def make_maze(self, key):
+        try:
+            start, end = self.zone(key)
+
+            # Adjust the start and end points to ensure odd dimensions
+            if (end[0] - start[0]) % 2 == 0:
+                end = (end[0] - 1, end[1])
+            if (end[1] - start[1]) % 2 == 0:
+                end = (end[0], end[1] - 1)
+
+            width, height = end[0] - start[0] + 1, end[1] - start[1] + 1
+
+            print(f"Generating maze with dimensions: {width}x{height}")
+
+            # Initialize the maze with all walls
+            maze = [[1] * width for _ in range(height)]
+            maze[-1] = [0] * width  # ensure that the last row is not a wall
+            for row in maze:
+                row[-1] = 0  # ensure that the last column is not a wall
+
+            # Start at a random cell
+            start_x, start_y = random.randrange(1, width - 2, 2), random.randrange(1, height - 2, 2)
+            maze[start_y][start_x] = 0
+
+            stack = [(start_x, start_y, None)]
+
+            directions = [(0, -1), (0, 1), (-1, 0), (1, 0)]  # Up, down, left, right
+
+            while stack:
+                if keyboard.is_pressed(stop_key):
+                    return
+
+                x, y, d = stack[-1]
+
+                possible_directions = directions.copy()
+                if d is not None:
+                    opposite_direction = (-d[0], -d[1])
+                    possible_directions.remove(opposite_direction)
+
+                random.shuffle(possible_directions)
+
+                for dx, dy in possible_directions:
+                    new_x, new_y = x + dx * 2, y + dy * 2
+
+                    if (1 <= new_x < width - 2) and (1 <= new_y < height - 2) and maze[new_y][new_x] == 1:
+                        maze[y + dy][x + dx] = 0
+                        maze[new_y][new_x] = 0
+                        stack.append((new_x, new_y, (dx, dy)))
+                        break
+                else:
+                    stack.pop()
+
+            # Create entrance and exit
+            entrance_point = random.choice([i for i in range(1, width - 2, 2) if maze[1][i] == 0])
+            exit_point = random.choice([i for i in range(1, width - 2, 2) if maze[height - 3][i] == 0])
+            maze[0][entrance_point] = 0
+            maze[height - 2][exit_point] = 0  # place the exit on the second-to-last row
+
+            entrance_coordinates = (entrance_point, 0)
+            exit_coordinates = (exit_point, height - 2)
+
+            wall_coords = {(x, y) for y in range(height) for x in range(width) if maze[y][x] == 1}
+
+            self.start = time.perf_counter()
+            for x, y in wall_coords:
+                if (x, y) != entrance_coordinates and (x, y) != exit_coordinates:
+                    self.emitsleep(start[0] + x, start[1] + y, priority=True, timer=True)
+        except:
+            pass
+    
     def scale_character(self, key, zone_width, zone_height):
         # Get the points for the character in its default size
         default_points = letters.get(key, ())
